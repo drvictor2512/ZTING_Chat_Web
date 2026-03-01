@@ -90,8 +90,8 @@ const Register = () => {
 
   return (
     <div className="auth-container">
+      <h1 className="auth-title">ZTING</h1>
       <div className="auth-box">
-        <h1 className="auth-title">ZTING</h1>
         
         <div className="auth-tabs">
           <Link to="/login" className="tab-btn">Đăng nhập</Link>

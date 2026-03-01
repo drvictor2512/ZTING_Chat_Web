@@ -23,6 +23,7 @@ const Login = () => {
     setError('')
   }
 
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setLoading(true)
@@ -30,7 +31,7 @@ const Login = () => {
 
     try {
       if (step === 1) {
-        // Step 1: Login without OTP to trigger OTP requirement
+        // Step 1: request OTP to be sent
         if (!formData.email || !formData.password) {
           setError('Vui lòng điền đầy đủ thông tin')
           setLoading(false)
@@ -38,20 +39,13 @@ const Login = () => {
         }
 
         try {
-          const response = await authService.login(formData.email, formData.password)
-          // If successful without OTP, redirect to home
-          if (response.token) {
-            navigate('/home')
-          }
+          await authService.sendLoginOTP(formData.email)
+          setStep(2)
         } catch (err) {
           const errorMsg = typeof err === 'string' ? err : err.message || ''
-          // Check if OTP is required
-          if (errorMsg.includes('OTP') || err.otpRequired) {
-            setStep(2) // Move to OTP step
-          } else {
-            setError(errorMsg || 'Đăng nhập thất bại')
-          }
+          setError(errorMsg || 'Không thể gửi mã OTP')
         }
+
       } else {
         // Step 2: Login with OTP
         if (!formData.otp) {
@@ -78,8 +72,8 @@ const Login = () => {
 
   return (
     <div className="auth-container">
+      <h1 className="auth-title">ZTING</h1>
       <div className="auth-box">
-        <h1 className="auth-title">ZTING</h1>
         
         <div className="auth-tabs">
           <button className="tab-btn active">Đăng nhập</button>

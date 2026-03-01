@@ -11,7 +11,7 @@ const authService = {
     }
   },
 
-  // Login user - signin (needs OTP on second attempt)
+  // Login user - signin (requires OTP)
   login: async (email, password, otp = null) => {
     try {
       const payload = { email, password }
@@ -24,6 +24,16 @@ const authService = {
         localStorage.setItem('token', response.data.token)
         localStorage.setItem('user', JSON.stringify(response.data.fetchUser))
       }
+      return response.data
+    } catch (error) {
+      throw error.response?.data || error.message
+    }
+  },
+
+  // Request a login OTP be sent to the user
+  sendLoginOTP: async (email) => {
+    try {
+      const response = await api.post('/auth/otp', { email })
       return response.data
     } catch (error) {
       throw error.response?.data || error.message

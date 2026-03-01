@@ -108,6 +108,7 @@ const ForgotPassword = () => {
 
   return (
     <div className="auth-container">
+      <h1 className="auth-title">ZTING</h1>
       <div className="auth-box forgot-password-box">
         <Link to="/login" className="back-link">← Quay lại</Link>
         
