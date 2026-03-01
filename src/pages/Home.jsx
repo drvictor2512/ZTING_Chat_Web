@@ -371,6 +371,10 @@ const Home = () => {
                     <MdPersonAdd />
                   </div>
                 )}
+                {/* Logout icon available in header for quick sign-out */}
+                <div className="icon" title="Đăng xuất" onClick={handleLogout}>
+                  <MdLogout />
+                </div>
               </div>
             </div>
 
