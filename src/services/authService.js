@@ -11,13 +11,10 @@ const authService = {
     }
   },
 
-  // Login user - signin (requires OTP)
-  login: async (email, password, otp = null) => {
+  // Login user - signin (email & password only)
+  login: async (email, password) => {
     try {
       const payload = { email, password }
-      if (otp) {
-        payload.otp = otp
-      }
       const response = await api.post('/auth/signin', payload)
       
       if (response.data.token) {
@@ -30,10 +27,20 @@ const authService = {
     }
   },
 
-  // Request a login OTP be sent to the user
-  sendLoginOTP: async (email) => {
+  // Send or request a generic OTP (used for signup verification or forgot-password)
+  sendOTP: async (email) => {
     try {
       const response = await api.post('/auth/otp', { email })
+      return response.data
+    } catch (error) {
+      throw error.response?.data || error.message
+    }
+  },
+
+  // Verify an OTP (for signup or reset flows)
+  verifyOTP: async (email, otp) => {
+    try {
+      const response = await api.post('/auth/verify-otp', { email, otp })
       return response.data
     } catch (error) {
       throw error.response?.data || error.message

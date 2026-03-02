@@ -7,11 +7,9 @@ const Login = () => {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [step, setStep] = useState(1) // Step 1: Email/Password, Step 2: OTP
   const [formData, setFormData] = useState({
     email: '',
-    password: '',
-    otp: ''
+    password: ''
   })
 
   const handleChange = (e) => {
@@ -23,44 +21,23 @@ const Login = () => {
     setError('')
   }
 
-
   const handleSubmit = async (e) => {
     e.preventDefault()
     setLoading(true)
     setError('')
 
     try {
-      if (step === 1) {
-        // Step 1: request OTP to be sent
-        if (!formData.email || !formData.password) {
-          setError('Vui lòng điền đầy đủ thông tin')
-          setLoading(false)
-          return
-        }
+      if (!formData.email || !formData.password) {
+        setError('Vui lòng điền đầy đủ thông tin')
+        setLoading(false)
+        return
+      }
 
-        try {
-          await authService.sendLoginOTP(formData.email)
-          setStep(2)
-        } catch (err) {
-          const errorMsg = typeof err === 'string' ? err : err.message || ''
-          setError(errorMsg || 'Không thể gửi mã OTP')
-        }
-
+      const response = await authService.login(formData.email, formData.password)
+      if (response.token) {
+        navigate('/home')
       } else {
-        // Step 2: Login with OTP
-        if (!formData.otp) {
-          setError('Vui lòng nhập mã OTP')
-          setLoading(false)
-          return
-        }
-
-        const response = await authService.login(formData.email, formData.password, formData.otp)
-        
-        if (response.token) {
-          navigate('/home')
-        } else {
-          setError(response.message || 'Đăng nhập thất bại')
-        }
+        setError(response.message || 'Đăng nhập thất bại')
       }
     } catch (err) {
       const errorMsg = typeof err === 'string' ? err : err.message || 'Đăng nhập thất bại'
@@ -81,45 +58,27 @@ const Login = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="auth-form">
-          {step === 1 ? (
-            <>
-              <div className="form-group">
-                <input
-                  type="email"
-                  name="email"
-                  placeholder="Email"
-                  value={formData.email}
-                  onChange={handleChange}
-                  className="form-input"
-                />
-              </div>
+            <div className="form-group">
+            <input
+              type="email"
+              name="email"
+              placeholder="Email"
+              value={formData.email}
+              onChange={handleChange}
+              className="form-input"
+            />
+          </div>
 
-              <div className="form-group">
-                <input
-                  type="password"
-                  name="password"
-                  placeholder="Password"
-                  value={formData.password}
-                  onChange={handleChange}
-                  className="form-input"
-                />
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="step-info">Nhập mã OTP được gửi đến email của bạn</div>
-              <div className="form-group">
-                <input
-                  type="text"
-                  name="otp"
-                  placeholder="OTP"
-                  value={formData.otp}
-                  onChange={handleChange}
-                  className="form-input"
-                />
-              </div>
-            </>
-          )}
+          <div className="form-group">
+            <input
+              type="password"
+              name="password"
+              placeholder="Password"
+              value={formData.password}
+              onChange={handleChange}
+              className="form-input"
+            />
+          </div>
 
           {error && <div className="error-message">{error}</div>}
 
@@ -128,21 +87,8 @@ const Login = () => {
             className="submit-btn"
             disabled={loading}
           >
-            {loading ? 'Đang xử lý...' : (step === 1 ? 'ĐĂNG NHẬP' : 'XÁC NHẬN')}
+            {loading ? 'Đang xử lý...' : 'ĐĂNG NHẬP'}
           </button>
-
-          {step === 2 && (
-            <button 
-              type="button"
-              className="back-btn"
-              onClick={() => {
-                setStep(1)
-                setError('')
-              }}
-            >
-              ← Quay lại
-            </button>
-          )}
         </form>
 
         <div className="auth-footer">

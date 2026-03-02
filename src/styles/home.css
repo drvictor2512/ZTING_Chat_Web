@@ -69,17 +69,21 @@
 
 .sidebar .icon.active {
   background: #fff;
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+  color: #003399;
+  box-shadow: 0 0 15px rgba(255, 255, 255, 0.8), inset 0 0 10px rgba(0, 51, 153, 0.2);
+  font-weight: bold;
+  transform: scale(1.15);
 }
 
 .sidebar .icon.active::after {
   content: '';
   position: absolute;
-  width: 4px;
-  height: 4px;
-  background: #003399;
+  width: 8px;
+  height: 8px;
+  background: #ffd700;
   border-radius: 50%;
-  left: -10px;
+  left: -15px;
+  box-shadow: 0 0 8px rgba(255, 215, 0, 0.8);
 }
 
 .sidebar .settings-icon {
@@ -89,7 +93,8 @@
 
 /* contacts panel between sidebar and main area */
 .contacts-panel {
-  width: 280px;
+  /* widen panel so header icons can fit without spilling into main area */
+  width: 340px;
   background: #fff;
   display: flex;
   flex-direction: column;
@@ -97,6 +102,7 @@
   height: 100%;
   overflow-y: auto;
 }
+
 
 .contacts-panel-empty {
   display: flex;
@@ -113,8 +119,10 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  justify-content: space-between; /* push icons to far right */
   border-bottom: 1px solid #e0e0e0;
 }
+
 
 .contacts-header .avatar {
   width: 40px;
@@ -131,11 +139,19 @@
 
 .contacts-header .search-wrapper {
   position: relative;
-  flex: 1;
+  /* search should flex to fill remaining space but shrink when needed */
+  flex: 1 1 auto;
+  min-width: 100px;
+  max-width: calc(100% - 170px); /* leave at least space for icons */
+  margin-right: 10px; /* gap before icons */
 }
+
+
+
 
 .contacts-header .search {
   width: 100%;
+  min-width: 180px;
   height: 32px;
   border: 1px solid #ccc;
   border-radius: 16px;
@@ -162,6 +178,9 @@
 .contacts-icon-group {
   display: flex;
   gap: 10px;
+  flex-shrink: 0; /* never shrink into the search area */
+  /* ensure icons stay visible by sitting at end of header */
+  justify-content: flex-end;
 }
 
 .contacts-icon-group .icon {

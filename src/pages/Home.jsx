@@ -256,21 +256,6 @@ const Home = () => {
               <h2>Cài đặt</h2>
               <div className="settings-sections">
                 <div className="settings-section">
-                  <h3>Tài khoản</h3>
-                  <div className="settings-item">
-                    <label>Tên người dùng:</label>
-                    <span>{user?.name || 'Không có tên'}</span>
-                  </div>
-                  <div className="settings-item">
-                    <label>Email:</label>
-                    <span>{user?.email || 'Không có email'}</span>
-                  </div>
-                  <button className="btn-edit">
-                    <MdEdit /> Chỉnh sửa hồ sơ
-                  </button>
-                </div>
-
-                <div className="settings-section">
                   <h3>Bảo mật</h3>
                   <div className="settings-item">
                     <button className="btn-danger">Đổi mật khẩu</button>
@@ -353,27 +338,14 @@ const Home = () => {
                 />
               </div>
               <div className="contacts-icon-group">
-                {currentView === 'chat' && (
-                  <>
-                    <div className="icon" title="Hồ sơ">
-                      <MdPerson />
-                    </div>
-                    <div className="icon" title="Thêm bạn">
-                      <MdPersonAdd />
-                    </div>
-                    <div className="icon" title="Tham gia group">
-                      <MdLink />
-                    </div>
-                  </>
-                )}
-                {currentView === 'friends' && (
-                  <div className="icon" title="Thêm bạn">
-                    <MdPersonAdd />
-                  </div>
-                )}
-                {/* Logout icon available in header for quick sign-out */}
-                <div className="icon" title="Đăng xuất" onClick={handleLogout}>
-                  <MdLogout />
+                <div className="icon" title="Hồ sơ">
+                  <MdPerson />
+                </div>
+                <div className="icon" title="Thêm bạn">
+                  <MdPersonAdd />
+                </div>
+                <div className="icon" title="Tham gia group">
+                  <MdLink />
                 </div>
               </div>
             </div>
