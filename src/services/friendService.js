@@ -4,7 +4,8 @@ const friendService = {
   // Send friend request
   sendFriendRequest: async (userId) => {
     try {
-      const response = await api.post('/friends/requests', { userId })
+      // backend expects { to }
+      const response = await api.post('/friends/requests', { to: userId })
       return response.data
     } catch (error) {
       throw error.response?.data || error.message

@@ -120,6 +120,23 @@ const conversationService = {
     } catch (error) {
       throw error.response?.data || error.message
     }
+  },
+
+  // Send a message (direct or group)
+  sendMessage: async ({ conversationId, recipientId, content, isGroup = false }) => {
+    try {
+      const formData = new FormData()
+      if (recipientId) formData.append('recipientId', recipientId)
+      if (conversationId) formData.append('conversationId', conversationId)
+      if (content !== undefined) formData.append('content', content)
+      const url = isGroup ? '/messages/group' : '/messages/direct'
+      const response = await api.post(url, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      return response.data
+    } catch (error) {
+      throw error.response?.data || error.message
+    }
   }
 }
 

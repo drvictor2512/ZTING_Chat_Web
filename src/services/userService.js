@@ -4,7 +4,7 @@ const userService = {
   // Get current user profile
   getProfile: async () => {
     try {
-      const response = await api.get('/users/profile')
+      const response = await api.get('/user/profile')
       return response.data
     } catch (error) {
       throw error.response?.data || error.message
@@ -14,7 +14,7 @@ const userService = {
   // Get user profile by ID
   getUserById: async (userId) => {
     try {
-      const response = await api.get(`/users/${userId}`)
+      const response = await api.get(`/user/${userId}`)
       return response.data
     } catch (error) {
       throw error.response?.data || error.message
@@ -24,7 +24,7 @@ const userService = {
   // Update profile
   updateProfile: async (data) => {
     try {
-      const response = await api.put('/users/profile', data)
+      const response = await api.put('/user/profile', data)
       return response.data
     } catch (error) {
       throw error.response?.data || error.message
@@ -36,7 +36,7 @@ const userService = {
     try {
       const formData = new FormData()
       formData.append('image', file)
-      const response = await api.post('/users/avatar', formData, {
+      const response = await api.post('/user/avatar', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         }
@@ -52,7 +52,7 @@ const userService = {
     try {
       const formData = new FormData()
       formData.append('image', file)
-      const response = await api.post('/users/banner', formData, {
+      const response = await api.post('/user/banner', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         }
@@ -66,7 +66,7 @@ const userService = {
   // Search user by email
   searchUserByEmail: async (email) => {
     try {
-      const response = await api.get('/users/search', {
+      const response = await api.get('/user/search', {
         params: { email }
       })
       return response.data
@@ -78,7 +78,7 @@ const userService = {
   // Block user
   blockUser: async (userId) => {
     try {
-      const response = await api.post('/users/block', { userId })
+      const response = await api.post('/user/block', { userId })
       return response.data
     } catch (error) {
       throw error.response?.data || error.message
@@ -88,7 +88,7 @@ const userService = {
   // Unblock user
   unblockUser: async (userId) => {
     try {
-      const response = await api.post('/users/unblock', { userId })
+      const response = await api.post('/user/unblock', { userId })
       return response.data
     } catch (error) {
       throw error.response?.data || error.message
@@ -98,7 +98,7 @@ const userService = {
   // Get blocked users
   getBlockedUsers: async () => {
     try {
-      const response = await api.get('/users/blocked')
+      const response = await api.get('/user/blocked')
       return response.data
     } catch (error) {
       throw error.response?.data || error.message

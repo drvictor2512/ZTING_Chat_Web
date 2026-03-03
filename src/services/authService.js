@@ -83,6 +83,16 @@ const authService = {
     }
   },
 
+  // Change password
+  changePassword: async (oldPassword, newPassword) => {
+    try {
+      const response = await api.post('/auth/change-password', { oldPassword, newPassword })
+      return response.data
+    } catch (error) {
+      throw error.response?.data || error.message
+    }
+  },
+
   // Get current user
   getCurrentUser: () => {
     const user = localStorage.getItem('user')
