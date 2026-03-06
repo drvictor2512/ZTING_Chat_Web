@@ -2,10 +2,13 @@ import api from '../config/api'
 
 const friendService = {
   // Send friend request
-  sendFriendRequest: async (userId) => {
+  sendFriendRequest: async (userId, message = '') => {
     try {
-      // backend expects { to }
-      const response = await api.post('/friends/requests', { to: userId })
+      // backend expects { to, message }
+      const response = await api.post('/friends/requests', { 
+        to: userId,
+        message: message 
+      })
       return response.data
     } catch (error) {
       throw error.response?.data || error.message
@@ -56,6 +59,16 @@ const friendService = {
   unfriend: async (userId) => {
     try {
       const response = await api.delete(`/friends/${userId}`)
+      return response.data
+    } catch (error) {
+      throw error.response?.data || error.message
+    }
+  },
+
+  // Cancel / revoke a sent friend request
+  cancelFriendRequest: async (requestId) => {
+    try {
+      const response = await api.post(`/friends/requests/${requestId}/cancel`)
       return response.data
     } catch (error) {
       throw error.response?.data || error.message
