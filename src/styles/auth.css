@@ -183,6 +183,29 @@
   border-color: #d0d0d0;
 }
 
+.resend-btn {
+  padding: 12px 24px;
+  background: #fff;
+  color: #003399;
+  border: 1px solid #003399;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-top: 10px;
+}
+
+.resend-btn:hover:not(:disabled) {
+  background: #003399;
+  color: white;
+}
+
+.resend-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .error-message {
   padding: 12px;
   background: #ffe5e5;
