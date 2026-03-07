@@ -36,11 +36,7 @@ const userService = {
     try {
       const formData = new FormData()
       formData.append('image', file)
-      const response = await api.post('/user/avatar', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      })
+      const response = await api.post('/user/avatar', formData)
       return response.data
     } catch (error) {
       throw error.response?.data || error.message
@@ -52,11 +48,7 @@ const userService = {
     try {
       const formData = new FormData()
       formData.append('image', file)
-      const response = await api.post('/user/banner', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      })
+      const response = await api.post('/user/banner', formData)
       return response.data
     } catch (error) {
       throw error.response?.data || error.message
