@@ -35,6 +35,7 @@ const Home = () => {
   const [newMessage, setNewMessage] = useState('')
   const [showInfoPanel, setShowInfoPanel] = useState(false)
   const [blockedUsers, setBlockedUsers] = useState([])
+  const [onlineStatus, setOnlineStatus] = useState({}) // { userId: { status: 'online'|'offline', lastSeen: timestamp } }
   const messagesEndRef = useRef(null)
 
   // load list of users blocked by current user
@@ -78,7 +79,12 @@ const Home = () => {
     const handleNewMessage = (newMsg) => {
       // Only add message if it's from the current conversation
       if (selectedContact && String(newMsg.conversationId) === String(selectedContact._id)) {
-        setMessages(prev => [...prev, newMsg])
+        setMessages(prev => {
+          // Check if message already exists to avoid duplicates
+          const exists = prev.some(m => String(m._id) === String(newMsg._id))
+          if (exists) return prev
+          return [...prev, newMsg]
+        })
       }
       // Update conversation list with new message
       loadConversations()
@@ -112,6 +118,49 @@ const Home = () => {
       }
     }
   }, [selectedContact])
+
+  // Listen for online/offline status
+  useEffect(() => {
+    const handleUserStatus = (data) => {
+      if (data && data.userId) {
+        setOnlineStatus(prev => ({
+          ...prev,
+          [String(data.userId)]: {
+            status: data.status || 'offline',
+            lastSeen: data.lastSeen || null
+          }
+        }))
+      }
+    }
+
+    const handleOnlineUsers = (data) => {
+      if (data && Array.isArray(data.users)) {
+        const statusMap = {}
+        data.users.forEach(u => {
+          if (u?.userId) {
+            statusMap[String(u.userId)] = {
+              status: u.status || 'offline',
+              lastSeen: u.lastSeen || null
+            }
+          }
+        })
+        setOnlineStatus(prev => ({ ...prev, ...statusMap }))
+      }
+    }
+
+    const socket = socketService.getSocket()
+    if (socket) {
+      socket.on('user_status', handleUserStatus)
+      socket.on('online_users', handleOnlineUsers)
+    }
+
+    return () => {
+      if (socket) {
+        socket.off('user_status', handleUserStatus)
+        socket.off('online_users', handleOnlineUsers)
+      }
+    }
+  }, [])
 
   // Update filtered contacts based on search term and current view
   useEffect(() => {
@@ -669,8 +718,12 @@ const Home = () => {
           }
         } catch (e) { }
         
-        // Add message to list if not already present
-        setMessages(prev => prev.some(m => String(m._id) === String(created._id)) ? prev : [...prev, created])
+        // Add message to list if not already present (socket will also add it, so this prevents duplicate)
+        setMessages(prev => {
+          const exists = prev.some(m => String(m._id) === String(created._id))
+          if (exists) return prev
+          return [...prev, created]
+        })
         
         // Update conversation list
         setConversations(prev => {
@@ -766,13 +819,27 @@ const Home = () => {
   const formatTime = (isoString) => {
     try {
       const d = new Date(isoString)
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const msgDate = new Date(d)
+      msgDate.setHours(0, 0, 0, 0)
+      
+      const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      
+      // Nếu là hôm nay, hiển thị "Hôm nay" + giờ
+      if (msgDate.getTime() === today.getTime()) {
+        return `Hôm nay ${timeStr}`
+      }
+      
+      // Nếu không phải hôm nay, hiển thị ngày/tháng + giờ
+      const dateStr = d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })
+      return `${dateStr} ${timeStr}`
     } catch {
       return ''
     }
   }
 
-  // relative time (minutes/hours ago)
+  // relative time (minutes/hours/days ago)
   const formatRelative = (isoString) => {
     try {
       const diff = Date.now() - new Date(isoString).getTime()
@@ -780,9 +847,50 @@ const Home = () => {
       if (mins < 1) return 'vừa xong'
       if (mins < 60) return `${mins} phút trước`
       const hrs = Math.floor(mins / 60)
-      return `${hrs} giờ trước`
+      if (hrs < 24) return `${hrs} giờ trước`
+      const days = Math.floor(hrs / 24)
+      return `${days} ngày trước`
     } catch {
       return ''
+    }
+  }
+
+  // helper to format date divider (Hôm nay, ngày/tháng/năm)
+  const formatDateDivider = (isoString) => {
+    try {
+      const msgDate = new Date(isoString)
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const msgDateOnly = new Date(msgDate)
+      msgDateOnly.setHours(0, 0, 0, 0)
+      
+      if (msgDateOnly.getTime() === today.getTime()) {
+        return 'Hôm nay'
+      }
+      
+      const yesterday = new Date(today)
+      yesterday.setDate(yesterday.getDate() - 1)
+      if (msgDateOnly.getTime() === yesterday.getTime()) {
+        return 'Hôm qua'
+      }
+      
+      return msgDate.toLocaleDateString('vi-VN', { day: 'numeric', month: 'numeric', year: 'numeric' })
+    } catch {
+      return ''
+    }
+  }
+
+  // helper to check if two dates are different days
+  const isDifferentDay = (date1, date2) => {
+    if (!date1 || !date2) return true
+    try {
+      const d1 = new Date(date1)
+      const d2 = new Date(date2)
+      d1.setHours(0, 0, 0, 0)
+      d2.setHours(0, 0, 0, 0)
+      return d1.getTime() !== d2.getTime()
+    } catch {
+      return true
     }
   }
 
@@ -830,14 +938,23 @@ const Home = () => {
                 <div className="chat-container">
                   <div className="chat-header">
                     <div className="chat-header-left">
-                      <div className="chat-avatar">
-                        {selectedContact?.participantAvatar ? (
-                          <img src={selectedContact.participantAvatar} alt="" />
-                        ) : selectedContact?.avatarUrl ? (
-                          <img src={selectedContact.avatarUrl} alt="" />
-                        ) : (
-                          (selectedContact.participantName || selectedContact.name || 'U').charAt(0).toUpperCase()
-                        )}
+                      <div className="chat-avatar-wrapper">
+                        <div className="chat-avatar">
+                          {selectedContact?.participantAvatar ? (
+                            <img src={selectedContact.participantAvatar} alt="" />
+                          ) : selectedContact?.avatarUrl ? (
+                            <img src={selectedContact.avatarUrl} alt="" />
+                          ) : (
+                            (selectedContact.participantName || selectedContact.name || 'U').charAt(0).toUpperCase()
+                          )}
+                        </div>
+                        {selectedContact?.type !== 'GROUP' && selectedContact?.participantId && (() => {
+                          const userStatus = onlineStatus[String(selectedContact.participantId)]
+                          const isOnline = userStatus?.status === 'online'
+                          return (
+                            <span className={`status-indicator ${isOnline ? 'online' : 'offline'}`}></span>
+                          )
+                        })()}
                       </div>
                       <div className="chat-header-info">
                         <h2>{selectedContact.name || selectedContact.participantName}</h2>
@@ -889,76 +1006,94 @@ const Home = () => {
                               senderName: msg.senderId?.name,
                               senderAvatar: msg.senderId?.avatarUrl,
                               isMine,
-                              messages: [msg]
+                              messages: [msg],
+                              createdAt: msg.createdAt
                             })
                           } else {
                             groups[groups.length - 1].messages.push(msg)
                           }
                         })
                         
-                        return groups.map((group, groupIdx) => (
-                          <div key={`group-${groupIdx}`} className={`message-group ${group.isMine ? 'sent-group' : 'received-group'}`}>
-                            {!group.isMine && (
-                              <div className="group-avatar" onClick={() => openUserPopup(group.senderId)}>
-                                {group.senderAvatar ? (
-                                  <img src={group.senderAvatar} alt="" />
-                                ) : (
-                                  (group.senderName ? group.senderName.charAt(0).toUpperCase() : 'U')
-                                )}
+                        const result = []
+                        groups.forEach((group, groupIdx) => {
+                          // Add date divider if this is the first message or if date changed
+                          const prevGroup = groupIdx > 0 ? groups[groupIdx - 1] : null
+                          const showDateDivider = !prevGroup || isDifferentDay(group.createdAt, prevGroup.createdAt)
+                          
+                          if (showDateDivider && group.createdAt) {
+                            result.push(
+                              <div key={`divider-${groupIdx}`} className="date-divider">
+                                {formatDateDivider(group.createdAt)}
                               </div>
-                            )}
-                            <div className="group-messages">
+                            )
+                          }
+                          
+                          result.push(
+                            <div key={`group-${groupIdx}`} className={`message-group ${group.isMine ? 'sent-group' : 'received-group'}`}>
                               {!group.isMine && (
-                                <div className="group-sender-name">{group.senderName || 'User'}</div>
-                              )}
-                              {group.messages.map(msg => (
-                                <div key={msg._id || msg.id || Math.random()} className="message-item">
-                                  {msg.isRecalled ? (
-                                    <span className="message-content recalled">
-                                      <em>Tin nhắn đã được thu hồi</em>
-                                    </span>
+                                <div className="group-avatar" onClick={() => openUserPopup(group.senderId)}>
+                                  {group.senderAvatar ? (
+                                    <img src={group.senderAvatar} alt="" />
                                   ) : (
-                                    <span className="message-content">
-                                      {msg.fileUrl ? (
-                                        <>
-                                          {isGifUrl(msg.fileUrl) ? (
-                                            <img src={msg.fileUrl} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.fileUrl, '_blank')} />
-                                          ) : isImageUrl(msg.fileUrl) ? (
-                                            <img src={msg.fileUrl} alt="attachment" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.fileUrl, '_blank')} />
-                                          ) : isVideoUrl(msg.fileUrl) ? (
-                                            <video controls className="message-video" style={{ maxWidth: '300px', borderRadius: '8px' }}><source src={msg.fileUrl} /></video>
-                                          ) : (
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                              <span className="message-file">📎 {basenameFromUrl(msg.fileUrl)}</span>
-                                              <button onClick={() => downloadFile(msg.fileUrl, basenameFromUrl(msg.fileUrl))} title="Tải về" style={{ background: 'none', border: 'none', color: '#60a5fa', fontSize: 18, lineHeight: 1, cursor: 'pointer', padding: 0 }}>⬇</button>
-                                            </div>
-                                          )}
-                                          {msg.content && <div style={{ marginTop: 4 }}>{msg.content}</div>}
-                                        </>
-                                      ) : isGifUrl(msg.content) ? (
-                                        <img src={msg.content} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.content, '_blank')} />
-                                      ) : isImageUrl(msg.content) ? (
-                                        <img src={msg.content} alt="image" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.content, '_blank')} />
-                                      ) : isVideoUrl(msg.content) ? (
-                                        <video controls className="message-video" style={{ maxWidth: '300px', borderRadius: '8px' }}><source src={msg.content} /></video>
-                                      ) : isDocumentUrl(msg.content) ? (
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                          <span className="message-file">📎 {basenameFromUrl(msg.content)}</span>
-                                          <button onClick={() => downloadFile(msg.content, basenameFromUrl(msg.content))} title="Tải về" style={{ background: 'none', border: 'none', color: '#60a5fa', fontSize: 18, lineHeight: 1, cursor: 'pointer', padding: 0 }}>⬇</button>
-                                        </div>
-                                      ) : (
-                                        <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</span>
-                                      )}
-                                    </span>
-                                  )}
-                                  {msg.createdAt && (
-                                    <span className="message-time">{formatTime(msg.createdAt)}</span>
+                                    (group.senderName ? group.senderName.charAt(0).toUpperCase() : 'U')
                                   )}
                                 </div>
-                              ))}
+                              )}
+                              <div className="group-messages">
+                                {!group.isMine && (
+                                  <div className="group-sender-name">{group.senderName || 'User'}</div>
+                                )}
+                                {group.messages.map(msg => (
+                                  <div key={msg._id || msg.id || Math.random()} className="message-item">
+                                    {msg.isRecalled ? (
+                                      <span className="message-content recalled">
+                                        <em>Tin nhắn đã được thu hồi</em>
+                                      </span>
+                                    ) : (
+                                      <span className="message-content">
+                                        {msg.fileUrl ? (
+                                          <>
+                                            {isGifUrl(msg.fileUrl) ? (
+                                              <img src={msg.fileUrl} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.fileUrl, '_blank')} />
+                                            ) : isImageUrl(msg.fileUrl) ? (
+                                              <img src={msg.fileUrl} alt="attachment" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.fileUrl, '_blank')} />
+                                            ) : isVideoUrl(msg.fileUrl) ? (
+                                              <video controls className="message-video" style={{ maxWidth: '300px', borderRadius: '8px' }}><source src={msg.fileUrl} /></video>
+                                            ) : (
+                                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                <span className="message-file">📎 {basenameFromUrl(msg.fileUrl)}</span>
+                                                <button onClick={() => downloadFile(msg.fileUrl, basenameFromUrl(msg.fileUrl))} title="Tải về" style={{ background: 'none', border: 'none', color: '#60a5fa', fontSize: 18, lineHeight: 1, cursor: 'pointer', padding: 0 }}>⬇</button>
+                                              </div>
+                                            )}
+                                            {msg.content && <div style={{ marginTop: 4 }}>{msg.content}</div>}
+                                          </>
+                                        ) : isGifUrl(msg.content) ? (
+                                          <img src={msg.content} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.content, '_blank')} />
+                                        ) : isImageUrl(msg.content) ? (
+                                          <img src={msg.content} alt="image" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.content, '_blank')} />
+                                        ) : isVideoUrl(msg.content) ? (
+                                          <video controls className="message-video" style={{ maxWidth: '300px', borderRadius: '8px' }}><source src={msg.content} /></video>
+                                        ) : isDocumentUrl(msg.content) ? (
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <span className="message-file">📎 {basenameFromUrl(msg.content)}</span>
+                                            <button onClick={() => downloadFile(msg.content, basenameFromUrl(msg.content))} title="Tải về" style={{ background: 'none', border: 'none', color: '#60a5fa', fontSize: 18, lineHeight: 1, cursor: 'pointer', padding: 0 }}>⬇</button>
+                                          </div>
+                                        ) : (
+                                          <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</span>
+                                        )}
+                                      </span>
+                                    )}
+                                    {msg.createdAt && (
+                                      <span className="message-time">{formatTime(msg.createdAt)}</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                          </div>
-                        ))
+                          )
+                        })
+                        
+                        return result
                       })()
                     )}
                     <div ref={messagesEndRef} />
@@ -1350,14 +1485,38 @@ const Home = () => {
                 .filter(contact => (contact.name || contact.participantName || contact.groupId?.name || contact.email))
                 .map(contact => {
                   const displayName = contact.name || contact.participantName || contact.groupId?.name || contact.email || ''
+                  const avatarUrl = contact.participantAvatar || contact.avatarUrl
+                  const userId = contact.participantId || contact._id
+                  const isGroup = contact.type === 'GROUP'
+                  const userStatus = !isGroup && userId ? onlineStatus[String(userId)] : null
+                  const isOnline = userStatus?.status === 'online'
+                  
                   return (
                     <div
                       key={contact._id || contact.participantId}
                       className={`contact-item ${selectedContact?._id === contact._id ? 'active' : ''}`}
                       onClick={() => handleContactClick(contact)}
                     >
-                      <div className="avatar">
-                        {displayName.charAt(0).toUpperCase()}
+                      <div 
+                        className="avatar-wrapper"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (!isGroup && userId) {
+                            openUserPopup(userId)
+                          }
+                        }}
+                        style={{ cursor: !isGroup && userId ? 'pointer' : 'default' }}
+                      >
+                        <div className="avatar">
+                          {avatarUrl ? (
+                            <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+                          ) : (
+                            displayName.charAt(0).toUpperCase()
+                          )}
+                        </div>
+                        {!isGroup && userId && (
+                          <span className={`status-indicator ${isOnline ? 'online' : 'offline'}`}></span>
+                        )}
                       </div>
                       <div className="contact-info">
                         <span className="name">
