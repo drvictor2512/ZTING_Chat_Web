@@ -45,6 +45,13 @@ const Home = () => {
   const [showChangePassword, setShowChangePassword] = useState(false)
   const [passwordForm, setPasswordForm] = useState({ oldPassword: '', newPassword: '', confirmPassword: '' })
   
+  // Dev feature toast
+  const [devToast, setDevToast] = useState(false)
+  const handleDevFeature = () => {
+    setDevToast(true)
+    setTimeout(() => setDevToast(false), 2500)
+  }
+
   // Add friend modal states
   const [showAddFriendModal, setShowAddFriendModal] = useState(false)
   const [searchEmail, setSearchEmail] = useState('')
@@ -1100,13 +1107,13 @@ const Home = () => {
               />
             </div>
             <div className="contacts-icon-group">
-              <div className="icon" title="Hồ sơ" onClick={openProfile}>
-                <MdPerson />
-              </div>
               <div className="icon" title="Thêm bạn" onClick={() => setShowAddFriendModal(true)}>
                 <MdPersonAdd />
               </div>
-              <div className="icon" title="Tham gia nhóm">
+              <div className="icon" title="Tạo nhóm chat" onClick={handleDevFeature}>
+                <MdGroup />
+              </div>
+              <div className="icon" title="Tham gia qua link" onClick={handleDevFeature}>
                 <MdLink />
               </div>
             </div>
@@ -1578,6 +1585,10 @@ const Home = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {devToast && (
+        <div className="dev-toast">Tính năng đang được phát triển</div>
       )}
     </>
   )
