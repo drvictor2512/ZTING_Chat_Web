@@ -2004,6 +2004,10 @@ const Home = () => {
           </div>
         </div>
       )}
+
+      {devToast && (
+        <div className="dev-toast">Tính năng đang được phát triển</div>
+      )}
     </>
   )
 }
