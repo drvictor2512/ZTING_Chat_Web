@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MdChat, MdPeople, MdSmartToy, MdSettings, MdPerson, MdPersonAdd, MdLink, MdLogout, MdEdit, MdClose, MdMenu, MdBlock, MdEmojiEmotions, MdAttachFile } from 'react-icons/md'
+import { MdChat, MdPeople, MdSmartToy, MdSettings, MdPerson, MdPersonAdd, MdLink, MdLogout, MdEdit, MdClose, MdMenu, MdBlock, MdEmojiEmotions, MdAttachFile, MdGroup, MdEmail, MdContacts } from 'react-icons/md'
 import EmojiPicker from 'emoji-picker-react'
 import authService from '../services/authService'
 import conversationService from '../services/conversationService'
@@ -49,6 +49,24 @@ const Home = () => {
   }
   const [showChangePassword, setShowChangePassword] = useState(false)
   const [passwordForm, setPasswordForm] = useState({ oldPassword: '', newPassword: '', confirmPassword: '' })
+
+  // Add friend modal states
+  const [showAddFriendModal, setShowAddFriendModal] = useState(false)
+  const [searchEmail, setSearchEmail] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [searchLoading, setSearchLoading] = useState(false)
+
+  // Send friend request popup states
+  const [showSendRequestModal, setShowSendRequestModal] = useState(false)
+  const [selectedUserToAdd, setSelectedUserToAdd] = useState(null)
+  const [requestMessage, setRequestMessage] = useState('Xin chào, mình muốn kết bạn với bạn!')
+
+  // Friend list management states
+  const [friendSearchTerm, setFriendSearchTerm] = useState('')
+  const [friendSortOrder, setFriendSortOrder] = useState('A-Z')
+  const [friendMenuOpen, setFriendMenuOpen] = useState(null)
+  const [filteredFriends, setFilteredFriends] = useState([])
+  const [friendsView, setFriendsView] = useState('friends-list')
 
   // Check authentication
   useEffect(() => {
@@ -633,6 +651,21 @@ const Home = () => {
     }
   }, [showEmojiPicker])
 
+  // Update filtered friends based on search and sort
+  useEffect(() => {
+    let filtered = friends.filter(friend =>
+      friend.name.toLowerCase().includes(friendSearchTerm.toLowerCase())
+    )
+    filtered.sort((a, b) => {
+      if (friendSortOrder === 'A-Z') {
+        return a.name.localeCompare(b.name)
+      } else {
+        return b.name.localeCompare(a.name)
+      }
+    })
+    setFilteredFriends(filtered)
+  }, [friends, friendSearchTerm, friendSortOrder])
+
   const handleSendMessage = async () => {
     if ((!newMessage.trim() && !pendingFile) || !selectedContact) return
     if (!newMessage.trim() && !pendingFile) {
@@ -790,8 +823,89 @@ const Home = () => {
     }
   }
 
+  // Revoke a sent friend request
+  const handleRevokeRequest = async (requestId) => {
+    try {
+      await friendService.cancelFriendRequest(requestId)
+      await loadFriendRequests()
+    } catch (err) {
+      console.error('[Revoke] error:', err)
+    }
+  }
+
+  // Search user by email for add friend modal
+  const handleSearchUser = async () => {
+    if (!searchEmail.trim()) return
+    setSearchLoading(true)
+    setError('')
+    try {
+      const [res, freshFriends, freshRequests] = await Promise.all([
+        userService.searchUserByEmail(searchEmail.trim()),
+        friendService.getAllFriends(),
+        friendService.getFriendRequests()
+      ])
+      const currentFriends = freshFriends.friends || []
+      const requestPayload = freshRequests.data || freshRequests
+      const currentSent = requestPayload.sent || []
+      const currentReceived = requestPayload.receive || []
+      setFriends(currentFriends)
+      setSentRequests(currentSent)
+      setFriendRequests(currentReceived)
+      const found = res.user || res
+      if (found && found._id) {
+        const isFriend = currentFriends.some(f => f._id === found._id)
+        const hasSentRequest = currentSent.some(r => (r.toUserId?._id || r.toUserId) === found._id)
+        const hasReceivedRequest = currentReceived.some(r => (r.fromUserId?._id || r.fromUserId) === found._id)
+        setSearchResults([{ ...found, isFriend, hasSentRequest, hasReceivedRequest, isSelf: found._id === user?._id }])
+      } else {
+        setSearchResults([])
+        setError('Không tìm thấy người dùng với email này')
+      }
+    } catch (err) {
+      setSearchResults([])
+      setError('Không tìm thấy người dùng với email này')
+    } finally {
+      setSearchLoading(false)
+    }
+  }
+
+  // Open send request popup
+  const handleSendRequestFromModal = (userId, userName) => {
+    setSelectedUserToAdd({ _id: userId, name: userName })
+    setShowSendRequestModal(true)
+  }
+
+  // Confirm send friend request with message
+  const confirmSendRequest = async () => {
+    if (!selectedUserToAdd) return
+    try {
+      await friendService.sendFriendRequest(selectedUserToAdd._id, requestMessage.trim())
+      await loadFriendRequests()
+      setSearchResults(prev => prev.map(u => u._id === selectedUserToAdd._id ? { ...u, hasSentRequest: true } : u))
+      setShowSendRequestModal(false)
+      setShowAddFriendModal(false)
+      setRequestMessage('Xin chào, mình muốn kết bạn với bạn!')
+      setSelectedUserToAdd(null)
+      alert('Đã gửi yêu cầu kết bạn')
+    } catch (err) {
+      const msg = typeof err === 'string' ? err : (err?.message || err?.error || null)
+      setError(msg || 'Không thể gửi yêu cầu kết bạn')
+      setShowSendRequestModal(false)
+      setSelectedUserToAdd(null)
+    }
+  }
+
+  // Reset add friend modal
+  const resetAddFriendModal = () => {
+    setShowAddFriendModal(false)
+    setSearchEmail('')
+    setSearchResults([])
+    setError('')
+  }
+
   // Unfriend someone
   const handleUnfriend = async (userId) => {
+    if (!window.confirm('Bạn có chắc chắn muốn hủy kết bạn?')) return
     try {
       await friendService.unfriend(userId)
       await loadFriends()
@@ -1244,100 +1358,195 @@ const Home = () => {
       case 'friends':
         return (
           <div className="main-area friends-view">
-            <div className="friends-container">
-              {friendRequests.length > 0 && (
-                <div className="friend-requests-section">
-                  <h3>Yêu cầu kết bạn ({friendRequests.length})</h3>
-                  <div className="requests-list">
-                    {friendRequests.map(request => (
-                      <div key={request._id} className="friend-request-item">
-                        <div className="request-info">
-                          <span className="name">{request.fromUserId?.name}</span>
-                          <span className="email">{request.fromUserId?.email}</span>
-                        </div>
-                        <div className="request-actions">
-                          <button
-                            className="btn-accept"
-                            onClick={() => handleAcceptRequest(request._id)}
-                          >
-                            Chấp nhận
-                          </button>
-                          <button
-                            className="btn-decline"
-                            onClick={() => handleDeclineRequest(request._id)}
-                          >
-                            Từ chối
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+            {friendsView === 'friend-requests' ? (
+              <div className="friends-detail-view">
+                <div className="fl-page-header">
+                  <MdPersonAdd className="fl-page-icon" />
+                  <h2 className="fl-page-title">Lời mời kết bạn</h2>
                 </div>
-              )}
-
-              {sentRequests.length > 0 && (
-                <div className="friend-requests-section">
-                  <h3>Đã gửi ({sentRequests.length})</h3>
-                  <div className="requests-list">
-                    {sentRequests.map(request => (
-                      <div key={request._id} className="friend-request-item">
-                        <div className="request-info">
-                          <span className="name">{request.toUserId?.name}</span>
-                          <span className="email">{request.toUserId?.email}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {friends.length > 0 && (
-                <div className="friends-list-section">
-                  <h3>Danh sách bạn ({friends.length})</h3>
-                  <div className="friends-grid">
-                    {filteredContacts.map(contact => {
-                      if (contact.searchResult) {
-                        // result from global email search, not yet a friend
-                        return (
-                          <div key={contact._id} className="friend-card search-result">
-                            <div className="friend-avatar"></div>
-                            <div className="friend-info">
-                              <span className="name">{contact.name || 'Không tên'}</span>
-                              <span className="email">{contact.email}</span>
+                <div className="fr-content">
+                  <div className="fr-section-header">Lời mời đã nhận ({friendRequests.length})</div>
+                  {friendRequests.length > 0 ? (
+                    <div className="fr-card-grid">
+                      {friendRequests.map(request => (
+                        <div key={request._id} className="fr-card">
+                          <div className="fr-card-top">
+                            <div className="fr-card-avatar">
+                              {request.fromUserId?.avatarUrl ? (
+                                <img src={request.fromUserId.avatarUrl} alt={request.fromUserId.name} />
+                              ) : (
+                                request.fromUserId?.name?.charAt(0).toUpperCase() || 'U'
+                              )}
                             </div>
-                            <button className="btn" onClick={() => handleSendRequest(contact._id)}>
-                              Kết bạn
+                            <div className="fr-card-info">
+                              <span className="fr-card-name">{request.fromUserId?.name}</span>
+                              <span className="fr-card-meta">Từ danh thiếp</span>
+                            </div>
+                            <button
+                              className="fr-chat-btn"
+                              title="Nhắn tin"
+                              onClick={(e) => { e.stopPropagation(); handleContactClick(request.fromUserId); setCurrentView('chat') }}
+                            >
+                              <MdChat />
                             </button>
                           </div>
-                        )
-                      }
-                      // existing friend card
-                      return (
-                        <div key={contact._id} className="friend-card">
-                          <div className="friend-avatar"></div>
-                          <div className="friend-info">
-                            <span className="name">{contact.name}</span>
-                            <span className="status">Đang hoạt động</span>
+                          {request.message && (
+                            <div className="fr-card-message">{request.message}</div>
+                          )}
+                          <div className="fr-card-actions">
+                            <button className="fr-btn-decline" onClick={() => handleDeclineRequest(request._id)}>Từ chối</button>
+                            <button className="fr-btn-accept" onClick={() => handleAcceptRequest(request._id)}>Đồng ý</button>
                           </div>
-                          <button
-                            className="btn-unfriend"
-                            onClick={() => handleUnfriend(contact._id)}
-                          >
-                            Huỷ
-                          </button>
                         </div>
-                      )
-                    })}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="fr-empty">Chưa có lời mời kết bạn nào</div>
+                  )}
+                  {sentRequests.length > 0 && (
+                    <>
+                      <div className="fr-section-header fr-section-header--spaced">Lời mời đã gửi ({sentRequests.length})</div>
+                      <div className="fr-card-grid">
+                        {sentRequests.map(request => (
+                          <div key={request._id} className="fr-card">
+                            <div className="fr-card-top">
+                              <div className="fr-card-avatar">
+                                {request.toUserId?.avatarUrl ? (
+                                  <img src={request.toUserId.avatarUrl} alt={request.toUserId.name} />
+                                ) : (
+                                  request.toUserId?.name?.charAt(0).toUpperCase() || 'U'
+                                )}
+                              </div>
+                              <div className="fr-card-info">
+                                <span className="fr-card-name">{request.toUserId?.name}</span>
+                                <span className="fr-card-meta">Đã gửi lời mời</span>
+                              </div>
+                            </div>
+                            <div className="fr-card-actions">
+                              <button className="fr-btn-revoke" onClick={() => handleRevokeRequest(request._id)}>Thu hồi lời mời</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </div>
-              )}
-
-              {friends.length === 0 && friendRequests.length === 0 && (
+              </div>
+            ) : friendsView === 'group-list' ? (
+              <div className="friends-detail-view">
+                <div className="fl-page-header">
+                  <MdGroup className="fl-page-icon" />
+                  <h2 className="fl-page-title">Danh sách nhóm và cộng đồng</h2>
+                </div>
                 <div className="empty-state">
-                  <p>Chưa có bạn nào. Tìm bạn để kết nối!</p>
+                  <p>Tính năng đang được phát triển</p>
                 </div>
-              )}
-            </div>
+              </div>
+            ) : friendsView === 'group-invites' ? (
+              <div className="friends-detail-view">
+                <div className="fl-page-header">
+                  <MdEmail className="fl-page-icon" />
+                  <h2 className="fl-page-title">Lời mời vào nhóm và cộng đồng</h2>
+                </div>
+                <div className="empty-state">
+                  <p>Chưa có lời mời nào</p>
+                </div>
+              </div>
+            ) : (
+              <div className="friends-detail-view">
+                <div className="fl-page-header">
+                  <MdContacts className="fl-page-icon" />
+                  <h2 className="fl-page-title">Danh sách bạn bè</h2>
+                </div>
+                <div className="fl-sub-header">
+                  Bạn bè ({filteredFriends.length})
+                </div>
+                <div className="fl-toolbar">
+                  <div className="fl-search-box">
+                    <svg className="fl-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input
+                      type="text"
+                      placeholder="Tìm bạn"
+                      value={friendSearchTerm}
+                      onChange={(e) => setFriendSearchTerm(e.target.value)}
+                      className="fl-search-input"
+                    />
+                  </div>
+                  <select
+                    value={friendSortOrder}
+                    onChange={(e) => setFriendSortOrder(e.target.value)}
+                    className="fl-sort-select"
+                  >
+                    <option value="A-Z">↕ Tên (A-Z)</option>
+                    <option value="Z-A">↕ Tên (Z-A)</option>
+                  </select>
+                </div>
+                {filteredFriends.length > 0 ? (() => {
+                  const groups = {}
+                  filteredFriends.forEach(f => {
+                    const letter = (f.name || 'U').charAt(0).toUpperCase()
+                    if (!groups[letter]) groups[letter] = []
+                    groups[letter].push(f)
+                  })
+                  const sortedLetters = Object.keys(groups).sort((a, b) =>
+                    friendSortOrder === 'Z-A' ? b.localeCompare(a) : a.localeCompare(b)
+                  )
+                  return (
+                    <div className="fl-list">
+                      {sortedLetters.map(letter => (
+                        <div key={letter} className="fl-group">
+                          <div className="fl-group-letter">{letter}</div>
+                          {groups[letter].map(friend => (
+                            <div
+                              key={friend._id}
+                              className="fl-friend-row"
+                              onClick={() => { handleContactClick(friend); setCurrentView('chat') }}
+                            >
+                              <div className="fl-avatar">
+                                {friend.avatarUrl ? (
+                                  <img src={friend.avatarUrl} alt={friend.name} />
+                                ) : (
+                                  friend.name?.charAt(0).toUpperCase() || 'U'
+                                )}
+                              </div>
+                              <span className="fl-name">{friend.name}</span>
+                              <button
+                                className="fl-more-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setFriendMenuOpen(friendMenuOpen === friend._id ? null : friend._id)
+                                }}
+                                title="Tùy chọn"
+                              >
+                                ···
+                              </button>
+                              {friendMenuOpen === friend._id && (
+                                <div className="fl-friend-menu">
+                                  <button onClick={(e) => { e.stopPropagation(); handleContactClick(friend); setCurrentView('chat'); setFriendMenuOpen(null) }}>
+                                    Nhắn tin
+                                  </button>
+                                  <button onClick={(e) => { e.stopPropagation(); handleUnfriend(friend._id); setFriendMenuOpen(null) }}>
+                                    Hủy kết bạn
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })() : friends.length === 0 ? (
+                  <div className="empty-state">
+                    <p>Chưa có bạn nào. Hãy thêm bạn để bắt đầu!</p>
+                  </div>
+                ) : (
+                  <div className="empty-state">
+                    <p>Không tìm thấy bạn nào phù hợp</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )
 
@@ -1420,9 +1629,9 @@ const Home = () => {
         <div
           className={`icon ${currentView === 'friends' ? 'active' : ''}`}
           onClick={() => handleViewChange('friends')}
-          title="Bạn bè"
+          title="Danh bạ"
         >
-          <MdPeople />
+          <MdContacts />
         </div>
 
         <div
@@ -1457,13 +1666,13 @@ const Home = () => {
                 />
               </div>
               <div className="contacts-icon-group">
-                <div className="icon" title="Hồ sơ" onClick={openProfile}>
-                  <MdPerson />
+                <div className="icon" title="Thêm bạn" onClick={() => setShowAddFriendModal(true)}>
+                  <MdPersonAdd />
                 </div>
-                <div className="icon" title="Tạo nhóm" onClick={() => setShowCreateGroupModal(true)}>
+                <div className="icon" title="Tạo nhóm chat" onClick={() => setShowCreateGroupModal(true)}>
                   <MdPeople />
                 </div>
-                <div className="icon" title="Tham gia group">
+                <div className="icon" title="Tham gia nhóm" onClick={() => alert('Tính năng đang được phát triển')}>
                   <MdLink />
                 </div>
               </div>
@@ -1471,7 +1680,41 @@ const Home = () => {
 
             {error && <div className="error-message">{error}</div>}
 
-            {loading ? (
+            {currentView === 'friends' ? (
+              <nav className="friends-nav">
+                <div
+                  className={`friends-nav-item ${friendsView === 'friends-list' ? 'active' : ''}`}
+                  onClick={() => setFriendsView('friends-list')}
+                >
+                  <MdContacts className="friends-nav-icon" />
+                  <span>Danh sách bạn bè</span>
+                </div>
+                <div
+                  className={`friends-nav-item ${friendsView === 'group-list' ? 'active' : ''}`}
+                  onClick={() => setFriendsView('group-list')}
+                >
+                  <MdGroup className="friends-nav-icon" />
+                  <span>Danh sách nhóm và cộng đồng</span>
+                </div>
+                <div
+                  className={`friends-nav-item ${friendsView === 'friend-requests' ? 'active' : ''}`}
+                  onClick={() => setFriendsView('friend-requests')}
+                >
+                  <MdPersonAdd className="friends-nav-icon" />
+                  <span>Lời mời kết bạn</span>
+                  {friendRequests.length > 0 && (
+                    <span className="friends-nav-badge">{friendRequests.length}</span>
+                  )}
+                </div>
+                <div
+                  className={`friends-nav-item ${friendsView === 'group-invites' ? 'active' : ''}`}
+                  onClick={() => setFriendsView('group-invites')}
+                >
+                  <MdEmail className="friends-nav-icon" />
+                  <span>Lời mời vào nhóm và cộng đồng</span>
+                </div>
+              </nav>
+            ) : loading ? (
               <div className="loading-state">
                 <p>Đang tải...</p>
               </div>
@@ -1755,6 +1998,95 @@ const Home = () => {
         </div>
       )}
 
+      {/* Add Friend Modal */}
+      {showAddFriendModal && (
+        <div className="profile-modal" onClick={resetAddFriendModal}>
+          <div className="add-friend-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="profile-header">
+              <h3>Thêm bạn</h3>
+              <button className="close-btn" onClick={resetAddFriendModal}><MdClose /></button>
+            </div>
+            <div className="add-friend-body">
+              <div className="add-friend-search-row">
+                <input
+                  type="text"
+                  className="add-friend-input"
+                  placeholder="Nhập email..."
+                  value={searchEmail}
+                  onChange={(e) => setSearchEmail(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSearchUser()}
+                />
+                <button
+                  className="add-friend-search-btn"
+                  onClick={handleSearchUser}
+                  disabled={searchLoading}
+                >
+                  {searchLoading ? 'Đang tìm...' : 'Tìm kiếm'}
+                </button>
+              </div>
+              {error && <div className="error-message" style={{ padding: '4px 0', color: 'red', fontSize: 13 }}>{error}</div>}
+              <div className="add-friend-results-label">Kết quả gần nhất</div>
+              {searchResults.length === 0 ? (
+                <div className="add-friend-empty">
+                  <p>Chưa có kết quả</p>
+                  <button className="add-friend-search-btn-ghost" onClick={handleSearchUser}>Tìm kiếm</button>
+                </div>
+              ) : (
+                searchResults.map(u => (
+                  <div key={u._id} className="add-friend-result-item">
+                    <div className="add-friend-avatar">
+                      {u.avatarUrl ? <img src={u.avatarUrl} alt={u.name} /> : (u.name?.charAt(0).toUpperCase() || 'U')}
+                    </div>
+                    <div className="add-friend-info">
+                      <span className="add-friend-name">{u.name}</span>
+                      <span className="add-friend-email">{u.email}</span>
+                    </div>
+                    <div className="add-friend-action">
+                      {u.isSelf ? (
+                        <span className="add-friend-tag">Bạn</span>
+                      ) : u.isFriend ? (
+                        <span className="add-friend-tag">Bạn bè</span>
+                      ) : u.hasSentRequest ? (
+                        <span className="add-friend-tag">Đã gửi</span>
+                      ) : u.hasReceivedRequest ? (
+                        <button className="fr-btn-accept" onClick={() => handleAcceptRequest(u._id)}>Đồng ý</button>
+                      ) : (
+                        <button className="fr-btn-accept" onClick={() => handleSendRequestFromModal(u._id, u.name)}>Kết bạn</button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Send Request Confirmation Modal */}
+      {showSendRequestModal && selectedUserToAdd && (
+        <div className="profile-modal" onClick={() => setShowSendRequestModal(false)}>
+          <div className="add-friend-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="profile-header">
+              <h3>Gửi lời mời kết bạn</h3>
+              <button className="close-btn" onClick={() => setShowSendRequestModal(false)}><MdClose /></button>
+            </div>
+            <div className="add-friend-body">
+              <p style={{ marginBottom: 8 }}>Gửi lời mời đến <strong>{selectedUserToAdd.name}</strong></p>
+              <textarea
+                className="add-friend-input"
+                style={{ resize: 'vertical', minHeight: 80 }}
+                value={requestMessage}
+                onChange={(e) => setRequestMessage(e.target.value)}
+              />
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+                <button className="btn btn-cancel" onClick={() => setShowSendRequestModal(false)}>Hủy</button>
+                <button className="fr-btn-accept" onClick={confirmSendRequest}>Gửi</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showChangePassword && (
         <div className="profile-modal" onClick={() => setShowChangePassword(false)}>
           <div className="profile-content" onClick={(e) => e.stopPropagation()}>
@@ -1880,12 +2212,12 @@ const Home = () => {
       {/* Create Group Modal */}
       {showCreateGroupModal && (
         <div className="profile-modal" onClick={() => setShowCreateGroupModal(false)}>
-          <div className="profile-popup" style={{ maxHeight: '90vh', minWidth: '400px' }} onClick={e => e.stopPropagation()}>
+          <div className="profile-popup" style={{ maxHeight: '90vh', width: '480px', maxWidth: '95vw', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
             <div className="profile-header">
               <h2>Tạo nhóm chat</h2>
               <MdClose className="close-icon" onClick={() => setShowCreateGroupModal(false)} />
             </div>
-            <div className="profile-content" style={{ padding: '20px' }}>
+            <div className="profile-content" style={{ padding: '20px', overflowY: 'auto', flex: 1, width: '100%', maxWidth: 'none', boxSizing: 'border-box', borderRadius: 0, boxShadow: 'none' }}>
               <div style={{ marginBottom: '15px' }}>
                 <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Tên nhóm</label>
                 <input
@@ -2005,9 +2337,7 @@ const Home = () => {
         </div>
       )}
 
-      {devToast && (
-        <div className="dev-toast">Tính năng đang được phát triển</div>
-      )}
+    
     </>
   )
 }
