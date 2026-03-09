@@ -1,7 +1,7 @@
 import axios from 'axios'
 
-// API base URL - Backend URL (deployed)
-const API_BASE_URL = 'https://chatapp-backend-eiae.onrender.com'
+// API base URL - từ environment variable hoặc default backend URL
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://chatapp-backend-eiae.onrender.com'
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -16,6 +16,10 @@ api.interceptors.request.use(
     const token = localStorage.getItem('token')
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
+    }
+    // If sending FormData, let axios handle Content-Type with proper boundary
+    if (config.data instanceof FormData) {
+      delete config.headers['Content-Type']
     }
     return config
   },

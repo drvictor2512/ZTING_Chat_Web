@@ -8,6 +8,7 @@ const Register = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [step, setStep] = useState(1) // 1 = fill info, 2 = enter OTP
+  const [resendLoading, setResendLoading] = useState(false) // Loading state for resend OTP
   const [formData, setFormData] = useState({
     email: '',
     name: '',
@@ -25,6 +26,19 @@ const Register = () => {
       [name]: value
     }))
     setError('')
+  }
+
+  const resendOTP = async () => {
+    setResendLoading(true)
+    try {
+      await authService.sendOTP(formData.email)
+      setError('')
+      alert('Mã OTP đã được gửi lại đến email của bạn')
+    } catch (err) {
+      setError('Không thể gửi lại OTP. Vui lòng thử lại.')
+    } finally {
+      setResendLoading(false)
+    }
   }
 
   const handleRegister = async (e) => {
@@ -77,8 +91,9 @@ const Register = () => {
           gender: genderMap[formData.gender] || formData.gender
         })
 
-        if (response.message) {
-          // backend will send the OTP email automatically
+        if (response.message || response.success) {
+          // Send OTP to email after successful registration
+          await authService.sendOTP(formData.email)
           setStep(2)
         } else {
           setError(response.message || 'Đăng ký thất bại')
@@ -219,6 +234,15 @@ const Register = () => {
                 disabled={loading}
               >
                 {loading ? 'Đang xác thực...' : 'XÁC NHẬN'}
+              </button>
+
+              <button 
+                type="button" 
+                className="resend-btn"
+                onClick={resendOTP}
+                disabled={resendLoading}
+              >
+                {resendLoading ? 'Đang gửi...' : 'Gửi lại OTP'}
               </button>
 
               <button 

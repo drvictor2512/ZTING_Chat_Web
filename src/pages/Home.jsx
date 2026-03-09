@@ -1,10 +1,13 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MdChat, MdPeople, MdSmartToy, MdSettings, MdPerson, MdPersonAdd, MdLink, MdLogout, MdEdit, MdClose, MdMenu, MdBlock } from 'react-icons/md'
+import { MdChat, MdPeople, MdSmartToy, MdSettings, MdPerson, MdPersonAdd, MdLink, MdLogout, MdEdit, MdClose, MdMenu, MdBlock, MdEmojiEmotions, MdAttachFile } from 'react-icons/md'
+import EmojiPicker from 'emoji-picker-react'
 import authService from '../services/authService'
 import conversationService from '../services/conversationService'
 import friendService from '../services/friendService'
 import userService from '../services/userService'
+import socketService from '../services/socketService'
+import { isImageUrl, isVideoUrl, isGifUrl, isDocumentUrl, basenameFromUrl, downloadFile } from '../utils/mediaHelpers'
 import '../styles/home.css'
 
 const Home = () => {
@@ -22,6 +25,7 @@ const Home = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showUserProfile, setShowUserProfile] = useState(false)
+  const [popupUser, setPopupUser] = useState(null)
   const [isEditingProfile, setIsEditingProfile] = useState(false)
   const [profileForm, setProfileForm] = useState({ name: '', dateOfBirth: '', gender: '', bio: '' })
   const avatarInputRef = useRef(null)
@@ -31,6 +35,7 @@ const Home = () => {
   const [newMessage, setNewMessage] = useState('')
   const [showInfoPanel, setShowInfoPanel] = useState(false)
   const [blockedUsers, setBlockedUsers] = useState([])
+  const [onlineStatus, setOnlineStatus] = useState({}) // { userId: { status: 'online'|'offline', lastSeen: timestamp } }
   const messagesEndRef = useRef(null)
 
   // load list of users blocked by current user
@@ -49,29 +54,156 @@ const Home = () => {
   useEffect(() => {
     if (!authService.isAuthenticated()) {
       navigate('/login')
+      return
     }
-    loadBlockedUsers()
-  }, [navigate])
 
-  // Load conversations on mount
-  useEffect(() => {
+    // load dữ liệu ban đầu cho màn home
     loadConversations()
+    loadFriends()
+    loadFriendRequests()
+    loadBlockedUsers()
+    
+    // Connect to socket
+    const userId = user?._id
+    if (userId) {
+      socketService.connect(userId)
+    }
+
+    return () => {
+      socketService.disconnect()
+    }
+  }, [navigate, user])
+
+  // Listen for real-time messages
+  useEffect(() => {
+    const handleNewMessage = (newMsg) => {
+      // Only add message if it's from the current conversation
+      if (selectedContact && String(newMsg.conversationId) === String(selectedContact._id)) {
+        setMessages(prev => {
+          // Check if message already exists to avoid duplicates
+          const exists = prev.some(m => String(m._id) === String(newMsg._id))
+          if (exists) return prev
+          return [...prev, newMsg]
+        })
+      }
+      // Update conversation list with new message
+      loadConversations()
+    }
+
+    const handleMessageRecalled = (data) => {
+      const { messageId, conversationId } = data
+      if (String(conversationId) === String(selectedContact?._id)) {
+        setMessages(prev =>
+          prev.map(msg =>
+            String(msg._id) === String(messageId)
+              ? { ...msg, isRecalled: true, content: null, fileUrl: null }
+              : msg
+          )
+        )
+      }
+    }
+
+    const socket = socketService.getSocket()
+    if (socket) {
+      socket.removeAllListeners('new_message')
+      socket.removeAllListeners('message_recalled')
+      socket.on('new_message', handleNewMessage)
+      socket.on('message_recalled', handleMessageRecalled)
+    }
+
+    return () => {
+      if (socket) {
+        socket.off('new_message', handleNewMessage)
+        socket.off('message_recalled', handleMessageRecalled)
+      }
+    }
+  }, [selectedContact])
+
+  // Listen for online/offline status
+  useEffect(() => {
+    const handleUserStatus = (data) => {
+      if (data && data.userId) {
+        setOnlineStatus(prev => ({
+          ...prev,
+          [String(data.userId)]: {
+            status: data.status || 'offline',
+            lastSeen: data.lastSeen || null
+          }
+        }))
+      }
+    }
+
+    const handleOnlineUsers = (data) => {
+      if (data && Array.isArray(data.users)) {
+        const statusMap = {}
+        data.users.forEach(u => {
+          if (u?.userId) {
+            statusMap[String(u.userId)] = {
+              status: u.status || 'offline',
+              lastSeen: u.lastSeen || null
+            }
+          }
+        })
+        setOnlineStatus(prev => ({ ...prev, ...statusMap }))
+      }
+    }
+
+    const socket = socketService.getSocket()
+    if (socket) {
+      socket.on('user_status', handleUserStatus)
+      socket.on('online_users', handleOnlineUsers)
+    }
+
+    return () => {
+      if (socket) {
+        socket.off('user_status', handleUserStatus)
+        socket.off('online_users', handleOnlineUsers)
+      }
+    }
   }, [])
 
   // Update filtered contacts based on search term and current view
   useEffect(() => {
+    const term = searchTerm.trim().toLowerCase()
     if (currentView === 'chat') {
-      const filtered = conversations.filter(conv =>
-        conv.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (conv.participantName && conv.participantName.toLowerCase().includes(searchTerm.toLowerCase()))
-      )
-      setFilteredContacts(filtered)
+      const isEmail = term.includes('@')
+      if (isEmail) {
+        userService.searchUserByEmail(term)
+          .then(res => {
+            const u = res.user || res
+            // if we already have a conversation with them, show it; otherwise present pseudo-convo so user can click and start
+            const existing = conversations.find(c => String(c.participantId) === String(u._id) || String(c.participantId) === String(u._id))
+            if (existing) setFilteredContacts([existing])
+            else setFilteredContacts([{ _id: null, participantId: u._id, participantName: u.name, name: u.name }])
+          })
+          .catch(() => setFilteredContacts([]))
+      } else {
+        const filtered = conversations.filter(conv =>
+          conv.name.toLowerCase().includes(term) ||
+          (conv.participantName && conv.participantName.toLowerCase().includes(term))
+        )
+        setFilteredContacts(filtered)
+      }
     } else if (currentView === 'friends') {
-      const filtered = friends.filter(friend =>
-        friend.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        friend.email.toLowerCase().includes(searchTerm.toLowerCase())
-      )
-      setFilteredContacts(filtered)
+      // if the input looks like an email, hit backend search (returns single user)
+      const isEmail = term.includes('@')
+      if (isEmail) {
+        userService.searchUserByEmail(term)
+          .then(res => {
+            const u = res.user || res
+            // if already a friend, just show them; otherwise show as "searchResult"
+            const exists = friends.find(f => String(f._id) === String(u._id))
+            setFilteredContacts(exists ? [exists] : [{ ...u, searchResult: true }])
+          })
+          .catch(() => {
+            setFilteredContacts([])
+          })
+      } else {
+        const filtered = friends.filter(friend =>
+          friend.name.toLowerCase().includes(term)
+        )
+        setFilteredContacts(filtered)
+      }
     }
   }, [searchTerm, currentView, conversations, friends])
 
@@ -82,27 +214,60 @@ const Home = () => {
       setError('')
       const res = await conversationService.getConversations()
       let convs = res.conversations || []
-      // attach helper fields for easy display and friend operations
+      // attach helper fields cho UI: tên hiển thị, avatar, participant cho chat 1-1 / nhóm
       convs = convs.map(c => {
-        // find other participant (not current user)
+        // find other participant (not current user) for direct chats
         let participantId = null
         let participantName = ''
-        if (c.participants && c.participants.length === 2) {
-          const other = c.participants.find(p => p._id !== user?._id)
+        let participantAvatar = ''
+        
+        if (c.type === 'DIRECT' && c.participants && c.participants.length === 2) {
+          const other = c.participants.find(p => {
+            // Handle both cases: p._id (direct) and p.userId._id (populated)
+            const pId = p._id || p.userId?._id
+            const userId = user?._id
+            return pId !== userId
+          })
           if (other) {
-            participantId = other._id
-            participantName = other.name
+            participantId = other._id || other.userId?._id
+            participantName = other.name || other.userId?.name || ''
+            participantAvatar = other.avatarUrl || other.userId?.avatarUrl || ''
           }
         }
+
+        // Populate participant names cho cả DIRECT và GROUP
+        const populatedParticipants = c.participants?.map(p => ({
+          ...p,
+          _id: p._id || p.userId?._id,
+          name: p.name || p.userId?.name,
+          avatarUrl: p.avatarUrl || p.userId?.avatarUrl
+        })) || []
+
+        // Tên hiển thị của cuộc trò chuyện
+        // bỏ qua các cuộc hội thoại đặc biệt (ví dụ AI) khỏi sidebar
+        if (c.isAI) return null
+
+        let displayName = c.name || participantName
+        if (c.type === 'GROUP') {
+          // ưu tiên tên group từ backend
+          displayName = c.groupId?.name || c.name || 'Nhóm không tên'
+        }
+
+        // nếu sau khi chuẩn hoá vẫn không có tên, bỏ qua để tránh dòng trống / lỗi
+        if (!displayName) return null
+
         return {
           ...c,
+          participants: populatedParticipants,
           participantId,
           participantName,
-          // ensure name falls back to participant name for direct chats
-          name: c.name || participantName
+          participantAvatar,
+          // name luôn là "tên hiển thị" đã chuẩn hoá ở trên
+          name: displayName
         }
       })
-      setConversations(convs)
+      // loại bỏ phần tử null (AI / hội thoại lỗi)
+      setConversations(convs.filter(Boolean))
     } catch (err) {
       setError('Không thể tải cuộc trò chuyện')
       console.error(err)
@@ -148,6 +313,8 @@ const Home = () => {
     if (view === 'friends') {
       await loadFriends()
       await loadFriendRequests()
+    } else if (view === 'chat') {
+      await loadConversations()
     }
   }
 
@@ -278,19 +445,30 @@ const Home = () => {
   // Handle contact click (conversation or friend)
   const handleContactClick = async (contact) => {
     let convo = contact;
-    // if clicked item is a simple friend (no participantId) attempt to find or create a convo
-    if (!contact.participantId) {
-      // try find existing conversation with that participant
+    // Chỉ khi click từ danh sách bạn bè (friend không có type) mới tự tạo cuộc trò chuyện DIRECT.
+    const isFriendItem = !contact.type && !contact.participantId
+    if (isFriendItem) {
+      // try find existing conversation với bạn đó
       convo = conversations.find(c => c.participantId === contact._id);
       if (!convo) {
-        // create new direct conversation
         try {
+          // tạo cuộc trò chuyện 1-1 mới
           await conversationService.createConversation({ type: 'DIRECT', memberIds: [contact._id] });
           await loadConversations();
-          convo = conversations.find(c => c.participantId === contact._id) || { _id: null, participantId: contact._id, participantName: contact.name, name: contact.name };
+          convo = conversations.find(c => c.participantId === contact._id) || {
+            _id: null,
+            participantId: contact._id,
+            participantName: contact.name,
+            name: contact.name
+          };
         } catch (e) {
           console.error('Failed to create conversation', e);
-          convo = { _id: null, participantId: contact._id, participantName: contact.name, name: contact.name };
+          convo = {
+            _id: null,
+            participantId: contact._id,
+            participantName: contact.name,
+            name: contact.name
+          };
         }
       }
     }
@@ -352,17 +530,26 @@ const Home = () => {
     }
   }
 
-  const handleRenameGroup = async () => {
+  const handleRenameGroup = () => {
     if (!selectedContact) return
-    const newName = prompt('Nhập tên mới cho nhóm', selectedContact.name || '')
-    if (!newName) return
+    setNewGroupName(selectedContact.name || '')
+    setShowRenameModal(true)
+  }
+  
+  const handleSubmitRename = async () => {
+    if (!newGroupName.trim()) {
+      setError('Vui lòng nhập tên nhóm')
+      return
+    }
     try {
-      await conversationService.renameGroup(selectedContact._id, newName)
+      await conversationService.renameGroup(selectedContact._id, newGroupName.trim())
       await loadConversations()
-      setSelectedContact(prev => ({ ...prev, name: newName }))
+      setSelectedContact(prev => ({ ...prev, name: newGroupName.trim() }))
+      setShowRenameModal(false)
+      setNewGroupName('')
     } catch (err) {
       console.error('rename failed', err)
-      setError('Không đổi tên nhóm được')
+      setError(err.message || 'Không đổi tên nhóm được')
     }
   }
 
@@ -373,38 +560,201 @@ const Home = () => {
       await conversationService.deleteGroup(selectedContact._id)
       await loadConversations()
       setSelectedContact(null)
+      setShowInfoPanel(false)
     } catch (err) {
       console.error('delete group failed', err)
       setError('Không thể xoá nhóm')
     }
   }
 
-  // send a new message
-  const handleSendMessage = async () => {
-    if (!newMessage.trim() || !selectedContact) return
+  // leave group as a normal member
+  const handleLeaveGroup = async () => {
+    if (!selectedContact) return
+    if (!window.confirm('Bạn có chắc muốn rời nhóm này?')) return
     try {
-      const convoId = selectedContact._id
-      let payload = { content: newMessage }
-      if (convoId) {
-        payload.conversationId = convoId
-      } else {
-        // send by recipient id for new convo
-        payload.recipientId = selectedContact.participantId || selectedContact._id
+      await conversationService.leaveGroup(selectedContact._id)
+      await loadConversations()
+      setSelectedContact(null)
+      setShowInfoPanel(false)
+    } catch (err) {
+      console.error('leave group failed', err)
+      setError(err.message || 'Không thể rời nhóm')
+    }
+  }
+
+  // send a new message
+  // file and emoji support
+  const [pendingFile, setPendingFile] = useState(null)
+  const fileInputRef2 = useRef(null)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const emojiPickerRef = useRef(null)
+  
+  // Create group modal
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false)
+  const [selectedFriendsForGroup, setSelectedFriendsForGroup] = useState([])
+  const [groupName, setGroupName] = useState('')
+  
+  // Rename group modal
+  const [showRenameModal, setShowRenameModal] = useState(false)
+  const [newGroupName, setNewGroupName] = useState('')
+
+  const emojis = ['😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😚', '😙', '🥲', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙁', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🤮', '🤧', '🥵', '🥶', '🥴', '😵', '🤯', '🤠', '🥳', '😎', '🤓', '🧐', '😕', '😟', '🙁', '😮', '😯', '😲', '😳', '🥺', '😦', '😧', '😨', '😰', '😥', '😢', '😭', '😱', '😖', '😣', '😞', '😓', '😩', '😫', '🥱', '😤', '😡', '😠', '🤬', '😈', '👿', '💀', '☠️', '💩', '🤡', '👹', '👺', '👻', '👽', '👾', '🤖', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾', '👋', '🤚', '🖐️', '✋', '🖖', '👌', '🤌', '🤏', '✌️', '🤞', '🫰', '🤟', '🤘', '🤙', '👍', '👎', '☝️', '👆', '👇', '☟', '✊', '👊', '🤛', '🤜', '💪', '🦾', '🦿', '🦵', '🦶', '👂', '👃', '🧠', '🦣', '🦴', '🫀', '🫁', '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟', '👋', '🎉', '🎊', '🎈', '🎀', '🎁', '🎂', '🍰', '🎃', '🎄', '⛄', '☃️', '🎆', '🎇', '✨', '🌟', '⭐', '🌠', '🌌', '🌃', '🌆', '🌇', '🌉', '🌁', '⛅', '⛈️', '🌤️', '🌥️', '☁️', '🌦️', '🌧️', '⚡', '🌩️', '🌨️', '❄️', '☃️', '🌬️', '💨', '💧', '💦', '☔', '🍏', '🍎', '🍐', '🍊', '🍋', '🍌', '🍉', '🍇', '🍓', '🍈', '🍒', '🍑', '🥭', '🍍', '🥥', '🥝', '🍅', '🍆', '🥑', '🥦', '🥬', '🥒', '🌶️', '🌽', '🥕', '🥔', '🍠', '🥐', '🥯', '🍞', '🥖', '🥨', '🧀', '🥚', '🍳', '🧈', '🥞', '🥓', '🥔', '🍤', '🍗', '🍖', '🌭', '🍔', '🍟', '🍕', '🥪', '🥙', '🧆', '🌮', '🌯', '🥗', '🥘', '🥫', '🍝', '🍜', '🍲', '🍛', '🍣', '🍱', '🥟', '🦪', '🍤', '🍙', '🍚', '🍘', '🍥', '🥠', '🥮', '🍢', '🍡', '🍧', '🍨', '🍦', '🍰', '🎂', '🍮', '🍭', '🍬', '🍫', '🍿', '🍩', '🍪', '🌰', '🍯', '☕', '🍵', '🍶', '🍾', '🍷', '🍸', '🍹', '🍺', '🍻', '🥂', '🥃']
+
+  const handleFileChange = e => {
+    const f = e.target.files && e.target.files[0]
+    if (!f) return
+    // Backend giới hạn 5MB → chặn sớm ở client để tránh lỗi 500
+    const maxSize = 5 * 1024 * 1024
+    if (f.size > maxSize) {
+      setError('File đính kèm tối đa 5MB. Vui lòng chọn file nhỏ hơn.')
+      e.target.value = ''
+      setPendingFile(null)
+      return
+    }
+    setError('')
+    setPendingFile(f)
+  }
+
+  const handleEmojiClick = (emoji) => {
+    setNewMessage(prev => prev + emoji)
+    setShowEmojiPicker(false)
+  }
+
+  // close emoji picker when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target)) {
+        setShowEmojiPicker(false)
       }
-      const res = await conversationService.sendMessage(payload)
-      // append to list
-      const msg = res.message || res
-      setMessages(prev => [...prev, msg])
-      // if conversation was just created, update selected contact id
-      if (!convoId && msg.conversationId) {
-        setSelectedContact(prev => ({ ...prev, _id: msg.conversationId }))
-        // also reload conversations so sidebar gets new convo
-        await loadConversations()
+    }
+    if (showEmojiPicker) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showEmojiPicker])
+
+  const handleSendMessage = async () => {
+    if ((!newMessage.trim() && !pendingFile) || !selectedContact) return
+    if (!newMessage.trim() && !pendingFile) {
+      setError('Nhập nội dung hoặc chọn file')
+      return
+    }
+
+    try {
+      let activeConv = selectedContact
+      
+      // If conversation doesn't exist yet, create it first
+      if (!activeConv._id && activeConv.participantId) {
+        try {
+          const created = await conversationService.createConversation({ 
+            type: 'DIRECT', 
+            memberIds: [activeConv.participantId] 
+          })
+          await loadConversations()
+          const freshList = await conversationService.getConversations()
+          const convs = freshList.conversations || []
+          activeConv = convs.find(c => String(c._id) === String(created._id)) || created
+          setSelectedContact(activeConv)
+        } catch (err) {
+          setError(err.message || 'Không thể tạo cuộc trò chuyện')
+          return
+        }
       }
+
+      // Create FormData matching Test_Frontend-main
+      const form = new FormData()
+      const content = newMessage.trim()
+      if (content) form.append('content', content)
+      if (activeConv?._id) form.append('conversationId', activeConv._id)
+      
+      // For direct messages, append recipientId
+      if (activeConv?.type === 'DIRECT') {
+        const otherParticipant = activeConv.participants?.find(p => {
+          const pId = p._id || p.userId?._id
+          return pId && String(pId) !== String(user?._id)
+        })
+        if (otherParticipant) {
+          const otherId = otherParticipant._id || otherParticipant.userId?._id
+          if (otherId) form.append('recipientId', otherId)
+        } else if (activeConv.participantId) {
+          form.append('recipientId', activeConv.participantId)
+        }
+      }
+      
+      // Append file as 'image' field (matching Test_Frontend-main)
+      if (pendingFile) form.append('image', pendingFile)
+
+      // Send message
+      const isGroup = activeConv?.type === 'GROUP'
+      let res = isGroup 
+        ? await conversationService.sendGroupMessage(form)
+        : await conversationService.sendDirectMessage(form)
+      
+      let created = res?.message || null
+      
+      // Clear input and file
       setNewMessage('')
+      setPendingFile(null)
+      if (fileInputRef2.current) fileInputRef2.current.value = ''
+      
+      // Update messages if message was created
+      if (created && selectedContact && String(created.conversationId) === String(selectedContact._id)) {
+        try {
+          // Populate senderId if it's just an ID
+          if (created.senderId && typeof created.senderId !== 'object') {
+            if (String(created.senderId) === String(user?._id)) {
+              created.senderId = { 
+                _id: created.senderId, 
+                name: user.name, 
+                avatarUrl: user.avatarUrl 
+              }
+            } else {
+              created.senderId = { 
+                _id: created.senderId, 
+                name: created.senderName || 'Người dùng', 
+                avatarUrl: created.senderAvatar 
+              }
+            }
+          }
+        } catch (e) { }
+        
+        // Add message to list if not already present (socket will also add it, so this prevents duplicate)
+        setMessages(prev => {
+          const exists = prev.some(m => String(m._id) === String(created._id))
+          if (exists) return prev
+          return [...prev, created]
+        })
+        
+        // Update conversation list
+        setConversations(prev => {
+          const convId = String(created.conversationId)
+          const idx = prev.findIndex(c => String(c._id) === convId)
+          if (idx === -1) {
+            loadConversations().catch(() => {})
+            return prev
+          }
+          const updated = [...prev]
+          const conv = { 
+            ...updated[idx], 
+            lastMessage: created, 
+            lastMessageAt: created.createdAt || new Date().toISOString() 
+          }
+          updated.splice(idx, 1)
+          updated.unshift(conv)
+          return updated
+        })
+      }
+      
+      // Reload conversations to ensure sidebar is updated
+      await loadConversations()
+      
+      // If conversation was just created, update selected contact id
+      if (!activeConv._id && created?.conversationId) {
+        setSelectedContact(prev => ({ ...prev, _id: created.conversationId }))
+      }
     } catch (err) {
       console.error('Lỗi khi gửi tin nhắn', err)
-      setError('Không thể gửi tin nhắn')
+      setError(err.message || 'Không thể gửi tin nhắn')
     }
   }
 
@@ -453,17 +803,43 @@ const Home = () => {
     }
   }
 
+  // helper to open a small popup when clicking user avatar in messages
+  const openUserPopup = async (userId) => {
+    try {
+      const res = await userService.getUserById(userId)
+      const u = res.user || res
+      setPopupUser(u)
+    } catch (err) {
+      console.error('cannot load user info', err)
+    }
+  }
+  const closePopup = () => setPopupUser(null)
+
   // helper to format a date/time string
   const formatTime = (isoString) => {
     try {
       const d = new Date(isoString)
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const msgDate = new Date(d)
+      msgDate.setHours(0, 0, 0, 0)
+      
+      const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      
+      // Nếu là hôm nay, hiển thị "Hôm nay" + giờ
+      if (msgDate.getTime() === today.getTime()) {
+        return `Hôm nay ${timeStr}`
+      }
+      
+      // Nếu không phải hôm nay, hiển thị ngày/tháng + giờ
+      const dateStr = d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })
+      return `${dateStr} ${timeStr}`
     } catch {
       return ''
     }
   }
 
-  // relative time (minutes/hours ago)
+  // relative time (minutes/hours/days ago)
   const formatRelative = (isoString) => {
     try {
       const diff = Date.now() - new Date(isoString).getTime()
@@ -471,9 +847,77 @@ const Home = () => {
       if (mins < 1) return 'vừa xong'
       if (mins < 60) return `${mins} phút trước`
       const hrs = Math.floor(mins / 60)
-      return `${hrs} giờ trước`
+      if (hrs < 24) return `${hrs} giờ trước`
+      const days = Math.floor(hrs / 24)
+      return `${days} ngày trước`
     } catch {
       return ''
+    }
+  }
+
+  // helper to format date divider (Hôm nay, ngày/tháng/năm)
+  const formatDateDivider = (isoString) => {
+    try {
+      const msgDate = new Date(isoString)
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const msgDateOnly = new Date(msgDate)
+      msgDateOnly.setHours(0, 0, 0, 0)
+      
+      if (msgDateOnly.getTime() === today.getTime()) {
+        return 'Hôm nay'
+      }
+      
+      const yesterday = new Date(today)
+      yesterday.setDate(yesterday.getDate() - 1)
+      if (msgDateOnly.getTime() === yesterday.getTime()) {
+        return 'Hôm qua'
+      }
+      
+      return msgDate.toLocaleDateString('vi-VN', { day: 'numeric', month: 'numeric', year: 'numeric' })
+    } catch {
+      return ''
+    }
+  }
+
+  // helper to check if two dates are different days
+  const isDifferentDay = (date1, date2) => {
+    if (!date1 || !date2) return true
+    try {
+      const d1 = new Date(date1)
+      const d2 = new Date(date2)
+      d1.setHours(0, 0, 0, 0)
+      d2.setHours(0, 0, 0, 0)
+      return d1.getTime() !== d2.getTime()
+    } catch {
+      return true
+    }
+  }
+
+  // Handle create group
+  const handleCreateGroup = async () => {
+    if (!groupName.trim()) {
+      setError('Vui lòng nhập tên nhóm')
+      return
+    }
+    if (selectedFriendsForGroup.length === 0) {
+      setError('Vui lòng chọn ít nhất một thành viên')
+      return
+    }
+    try {
+      const conversation = await conversationService.createConversation({
+        type: 'GROUP',
+        name: groupName.trim(),
+        memberIds: selectedFriendsForGroup
+      })
+      setShowCreateGroupModal(false)
+      setGroupName('')
+      setSelectedFriendsForGroup([])
+      await loadConversations()
+      setSelectedContact(conversation)
+    } catch (err) {
+      console.error('Lỗi khi tạo nhóm:', err)
+      setError(err.message || 'Không thể tạo nhóm')
     }
   }
 
@@ -493,8 +937,34 @@ const Home = () => {
               <div className="chat-wrapper">
                 <div className="chat-container">
                   <div className="chat-header">
-                    <h2>{selectedContact.name || selectedContact.participantName}</h2>
+                    <div className="chat-header-left">
+                      <div className="chat-avatar-wrapper">
+                        <div className="chat-avatar">
+                          {selectedContact?.participantAvatar ? (
+                            <img src={selectedContact.participantAvatar} alt="" />
+                          ) : selectedContact?.avatarUrl ? (
+                            <img src={selectedContact.avatarUrl} alt="" />
+                          ) : (
+                            (selectedContact.participantName || selectedContact.name || 'U').charAt(0).toUpperCase()
+                          )}
+                        </div>
+                        {selectedContact?.type !== 'GROUP' && selectedContact?.participantId && (() => {
+                          const userStatus = onlineStatus[String(selectedContact.participantId)]
+                          const isOnline = userStatus?.status === 'online'
+                          return (
+                            <span className={`status-indicator ${isOnline ? 'online' : 'offline'}`}></span>
+                          )
+                        })()}
+                      </div>
+                      <div className="chat-header-info">
+                        <h2>{selectedContact.name || selectedContact.participantName}</h2>
+                        {selectedContact.lastMessageAt && (
+                          <p className="chat-status">{formatRelative(selectedContact.lastMessageAt)}</p>
+                        )}
+                      </div>
+                    </div>
                     <MdMenu className="info-toggle" onClick={() => setShowInfoPanel(v => !v)} title="Chi tiết" />
+                    {/* compute status flags */}
                     {/* compute status flags */}
                     {(() => {
                       const contactId = selectedContact.participantId || selectedContact._id;
@@ -522,29 +992,168 @@ const Home = () => {
                     {messages.length === 0 ? (
                       <p className="no-messages">Bạn chưa có tin nhắn nào. Hãy gửi tin nhắn để bắt đầu cuộc trò chuyện!</p>
                     ) : (
-                      messages.map(msg => {
-                        const isMine = String(msg.senderId?._id || msg.senderId) === String(user?._id)
-                        return (
-                          <div
-                            key={msg._id || msg.id || Math.random()}
-                            className={`message-item ${isMine ? 'sent' : 'received'}`}
-                          >
-                            <span className="message-content">{msg.content}</span>
-                            {msg.createdAt && (
-                              <span className="message-time">{formatTime(msg.createdAt)}</span>
-                            )}
-                          </div>
-                        )
-                      })
+                      (() => {
+                        const groups = []
+                        messages.forEach((msg, idx) => {
+                          const isMine = String(msg.senderId?._id || msg.senderId) === String(user?._id)
+                          const prevMsg = idx > 0 ? messages[idx - 1] : null
+                          const prevIsMine = prevMsg ? String(prevMsg.senderId?._id || prevMsg.senderId) === String(user?._id) : null
+                          const isPrevSameSender = prevMsg && String(prevMsg.senderId?._id || prevMsg.senderId) === String(msg.senderId?._id || msg.senderId) && prevIsMine === isMine
+                          
+                          if (!isPrevSameSender) {
+                            groups.push({
+                              senderId: msg.senderId?._id || msg.senderId,
+                              senderName: msg.senderId?.name,
+                              senderAvatar: msg.senderId?.avatarUrl,
+                              isMine,
+                              messages: [msg],
+                              createdAt: msg.createdAt
+                            })
+                          } else {
+                            groups[groups.length - 1].messages.push(msg)
+                          }
+                        })
+                        
+                        const result = []
+                        groups.forEach((group, groupIdx) => {
+                          // Add date divider if this is the first message or if date changed
+                          const prevGroup = groupIdx > 0 ? groups[groupIdx - 1] : null
+                          const showDateDivider = !prevGroup || isDifferentDay(group.createdAt, prevGroup.createdAt)
+                          
+                          if (showDateDivider && group.createdAt) {
+                            result.push(
+                              <div key={`divider-${groupIdx}`} className="date-divider">
+                                {formatDateDivider(group.createdAt)}
+                              </div>
+                            )
+                          }
+                          
+                          result.push(
+                            <div key={`group-${groupIdx}`} className={`message-group ${group.isMine ? 'sent-group' : 'received-group'}`}>
+                              {!group.isMine && (
+                                <div className="group-avatar" onClick={() => openUserPopup(group.senderId)}>
+                                  {group.senderAvatar ? (
+                                    <img src={group.senderAvatar} alt="" />
+                                  ) : (
+                                    (group.senderName ? group.senderName.charAt(0).toUpperCase() : 'U')
+                                  )}
+                                </div>
+                              )}
+                              <div className="group-messages">
+                                {!group.isMine && (
+                                  <div className="group-sender-name">{group.senderName || 'User'}</div>
+                                )}
+                                {group.messages.map(msg => (
+                                  <div key={msg._id || msg.id || Math.random()} className="message-item">
+                                    {msg.isRecalled ? (
+                                      <span className="message-content recalled">
+                                        <em>Tin nhắn đã được thu hồi</em>
+                                      </span>
+                                    ) : (
+                                      <span className="message-content">
+                                        {msg.fileUrl ? (
+                                          <>
+                                            {isGifUrl(msg.fileUrl) ? (
+                                              <img src={msg.fileUrl} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.fileUrl, '_blank')} />
+                                            ) : isImageUrl(msg.fileUrl) ? (
+                                              <img src={msg.fileUrl} alt="attachment" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.fileUrl, '_blank')} />
+                                            ) : isVideoUrl(msg.fileUrl) ? (
+                                              <video controls className="message-video" style={{ maxWidth: '300px', borderRadius: '8px' }}><source src={msg.fileUrl} /></video>
+                                            ) : (
+                                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                <span className="message-file">📎 {basenameFromUrl(msg.fileUrl)}</span>
+                                                <button onClick={() => downloadFile(msg.fileUrl, basenameFromUrl(msg.fileUrl))} title="Tải về" style={{ background: 'none', border: 'none', color: '#60a5fa', fontSize: 18, lineHeight: 1, cursor: 'pointer', padding: 0 }}>⬇</button>
+                                              </div>
+                                            )}
+                                            {msg.content && <div style={{ marginTop: 4 }}>{msg.content}</div>}
+                                          </>
+                                        ) : isGifUrl(msg.content) ? (
+                                          <img src={msg.content} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.content, '_blank')} />
+                                        ) : isImageUrl(msg.content) ? (
+                                          <img src={msg.content} alt="image" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.content, '_blank')} />
+                                        ) : isVideoUrl(msg.content) ? (
+                                          <video controls className="message-video" style={{ maxWidth: '300px', borderRadius: '8px' }}><source src={msg.content} /></video>
+                                        ) : isDocumentUrl(msg.content) ? (
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <span className="message-file">📎 {basenameFromUrl(msg.content)}</span>
+                                            <button onClick={() => downloadFile(msg.content, basenameFromUrl(msg.content))} title="Tải về" style={{ background: 'none', border: 'none', color: '#60a5fa', fontSize: 18, lineHeight: 1, cursor: 'pointer', padding: 0 }}>⬇</button>
+                                          </div>
+                                        ) : (
+                                          <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</span>
+                                        )}
+                                      </span>
+                                    )}
+                                    {msg.createdAt && (
+                                      <span className="message-time">{formatTime(msg.createdAt)}</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )
+                        })
+                        
+                        return result
+                      })()
                     )}
-                  <div ref={messagesEndRef} />
+                    <div ref={messagesEndRef} />
                   </div>
                   <div className="chat-input">
+                    {pendingFile && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, padding: '4px 8px', background: '#f1f5f9', borderRadius: 8, width: '100%' }}>
+                        <span style={{ fontSize: 13, color: '#334155' }}>📎 {pendingFile.name}</span>
+                        <button 
+                          onClick={() => { 
+                            setPendingFile(null)
+                            if (fileInputRef2.current) fileInputRef2.current.value = ''
+                          }} 
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 16, lineHeight: 1, marginLeft: 'auto' }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    )}
+                    <button 
+                      className="icon-btn emoji-btn" 
+                      title="Emoji"
+                      onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                    >
+                      <MdEmojiEmotions />
+                    </button>
+                    {showEmojiPicker && (
+                      <div className="emoji-picker-container" ref={emojiPickerRef}>
+                        <EmojiPicker 
+                          onEmojiClick={(emojiData) => {
+                            const emoji = emojiData?.emoji || emojiData
+                            setNewMessage(prev => prev + (emoji || ''))
+                            setShowEmojiPicker(false)
+                          }}
+                          width="100%"
+                          height={400}
+                        />
+                      </div>
+                    )}
+                    <input
+                      ref={fileInputRef2}
+                      type="file"
+                      accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
+                      style={{ display: 'none' }}
+                      onChange={handleFileChange}
+                    />
+                    <button className="icon-btn attach-btn" onClick={() => fileInputRef2.current?.click()} title="Đính kèm">
+                      <MdAttachFile />
+                    </button>
                     <input
                       value={newMessage}
                       onChange={e => setNewMessage(e.target.value)}
                       placeholder="Nhập tin nhắn..."
-                      onKeyDown={e => { if (e.key === 'Enter') handleSendMessage() }}
+                      onKeyDown={async e => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault()
+                          if (!newMessage.trim() && !pendingFile) return
+                          await handleSendMessage()
+                        }
+                      }}
                     />
                     <button onClick={handleSendMessage}>Gửi</button>
                   </div>
@@ -566,13 +1175,18 @@ const Home = () => {
                         </div>
                         <div className="info-body">
                           <div className="info-section members">
-                            <h4>Thành viên</h4>
-                            {selectedContact.participants?.map(p => (
-                              <div className="member-item" key={p.userId?._id || p.userId}>
-                                <span className="member-name">{p.userId?.name || '...'}</span>
-                                <span className="member-role">{p.role}</span>
-                              </div>
-                            ))}
+                            <h4>Thành viên ({selectedContact.participants?.length || 0})</h4>
+                            {selectedContact.participants?.map(p => {
+                              const userId = p.userId?._id || p._id
+                              const userName = p.userId?.name || p.name || 'User'
+                              const role = p.role || 'Thành viên'
+                              return (
+                                <div className="member-item" key={userId}>
+                                  <span className="member-name">{userName}</span>
+                                  <span className="member-role">{role}</span>
+                                </div>
+                              )
+                            })}
                           </div>
                           <div className="info-section">
                             <h4>Ảnh/Video</h4>
@@ -580,7 +1194,15 @@ const Home = () => {
                           <div className="info-section">
                             <h4>File</h4>
                           </div>
-                          <button className="btn-danger" onClick={handleDeleteGroup}>Xóa nhóm</button>
+                          {(() => {
+                            const me = selectedContact.participants?.find(p => String(p._id) === String(user?._id))
+                            const isOwner = me?.role === 'Trưởng nhóm'
+                            return isOwner ? (
+                              <button className="btn-danger" onClick={handleDeleteGroup}>Xóa nhóm</button>
+                            ) : (
+                              <button className="btn-danger" onClick={handleLeaveGroup}>Rời nhóm</button>
+                            )
+                          })()}
                         </div>
                       </>
                     ) : (
@@ -673,21 +1295,39 @@ const Home = () => {
                 <div className="friends-list-section">
                   <h3>Danh sách bạn ({friends.length})</h3>
                   <div className="friends-grid">
-                    {filteredContacts.map(friend => (
-                      <div key={friend._id} className="friend-card">
-                        <div className="friend-avatar"></div>
-                        <div className="friend-info">
-                          <span className="name">{friend.name}</span>
-                          <span className="status">Đang hoạt động</span>
+                    {filteredContacts.map(contact => {
+                      if (contact.searchResult) {
+                        // result from global email search, not yet a friend
+                        return (
+                          <div key={contact._id} className="friend-card search-result">
+                            <div className="friend-avatar"></div>
+                            <div className="friend-info">
+                              <span className="name">{contact.name || 'Không tên'}</span>
+                              <span className="email">{contact.email}</span>
+                            </div>
+                            <button className="btn" onClick={() => handleSendRequest(contact._id)}>
+                              Kết bạn
+                            </button>
+                          </div>
+                        )
+                      }
+                      // existing friend card
+                      return (
+                        <div key={contact._id} className="friend-card">
+                          <div className="friend-avatar"></div>
+                          <div className="friend-info">
+                            <span className="name">{contact.name}</span>
+                            <span className="status">Đang hoạt động</span>
+                          </div>
+                          <button
+                            className="btn-unfriend"
+                            onClick={() => handleUnfriend(contact._id)}
+                          >
+                            Huỷ
+                          </button>
                         </div>
-                        <button
-                          className="btn-unfriend"
-                          onClick={() => handleUnfriend(friend._id)}
-                        >
-                          Huỷ
-                        </button>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               )}
@@ -811,7 +1451,7 @@ const Home = () => {
                 <MdEdit className="search-icon" />
                 <input
                   className="search"
-                  placeholder="Tìm kiếm..."
+                  placeholder="Tìm tên/ email"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
@@ -820,23 +1460,8 @@ const Home = () => {
                 <div className="icon" title="Hồ sơ" onClick={openProfile}>
                   <MdPerson />
                 </div>
-                <div className="icon" title="Thêm bạn" onClick={async () => {
-                    const email = prompt('Nhập email người dùng để gửi yêu cầu kết bạn');
-                    if (!email) return;
-                    try {
-                      const res = await userService.searchUserByEmail(email.trim());
-                      const found = res.user || res;
-                      if (found && found._id) {
-                        await handleSendRequest(found._id);
-                      } else {
-                        setError('Không tìm thấy người dùng với email đã nhập');
-                      }
-                    } catch (err) {
-                      console.error(err);
-                      setError(err.message || 'Không tìm thấy người dùng với email đã nhập');
-                    }
-                  }}>
-                  <MdPersonAdd />
+                <div className="icon" title="Tạo nhóm" onClick={() => setShowCreateGroupModal(true)}>
+                  <MdPeople />
                 </div>
                 <div className="icon" title="Tham gia group">
                   <MdLink />
@@ -855,27 +1480,55 @@ const Home = () => {
                 <p>Không tìm thấy liên hệ nào</p>
               </div>
             ) : (
-              filteredContacts.map(contact => (
-                <div
-                  key={contact._id}
-                  className={`contact-item ${selectedContact?._id === contact._id ? 'active' : ''}`}
-                  onClick={() => handleContactClick(contact)}
-                >
-                  <div className="avatar">
-                    {(contact.name || contact.participantName)
-                      .charAt(0)
-                      .toUpperCase()}
-                  </div>
-                  <div className="contact-info">
-                    <span className="name">
-                      {contact.name || contact.participantName}
-                    </span>
-                    <span className="last-message">
-                      {contact.lastMessage?.content || 'Không có tin nhắn'}
-                    </span>
-                  </div>
-                </div>
-              ))
+              filteredContacts
+                // bỏ qua các item không có tên hiển thị để tránh dòng trống
+                .filter(contact => (contact.name || contact.participantName || contact.groupId?.name || contact.email))
+                .map(contact => {
+                  const displayName = contact.name || contact.participantName || contact.groupId?.name || contact.email || ''
+                  const avatarUrl = contact.participantAvatar || contact.avatarUrl
+                  const userId = contact.participantId || contact._id
+                  const isGroup = contact.type === 'GROUP'
+                  const userStatus = !isGroup && userId ? onlineStatus[String(userId)] : null
+                  const isOnline = userStatus?.status === 'online'
+                  
+                  return (
+                    <div
+                      key={contact._id || contact.participantId}
+                      className={`contact-item ${selectedContact?._id === contact._id ? 'active' : ''}`}
+                      onClick={() => handleContactClick(contact)}
+                    >
+                      <div 
+                        className="avatar-wrapper"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (!isGroup && userId) {
+                            openUserPopup(userId)
+                          }
+                        }}
+                        style={{ cursor: !isGroup && userId ? 'pointer' : 'default' }}
+                      >
+                        <div className="avatar">
+                          {avatarUrl ? (
+                            <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+                          ) : (
+                            displayName.charAt(0).toUpperCase()
+                          )}
+                        </div>
+                        {!isGroup && userId && (
+                          <span className={`status-indicator ${isOnline ? 'online' : 'offline'}`}></span>
+                        )}
+                      </div>
+                      <div className="contact-info">
+                        <span className="name">
+                          {displayName}
+                        </span>
+                        <span className="last-message">
+                          {contact.lastMessage?.content || 'Không có tin nhắn'}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })
             )}
           </>
         ) : (
@@ -1035,6 +1688,73 @@ const Home = () => {
       )}
       </div>  {/* end home-container */}
 
+      {/* popup when clicking on another user's avatar in chat */}
+      {popupUser && (
+        <div className="profile-modal" onClick={closePopup}>
+          <div className="profile-content" onClick={e => e.stopPropagation()}>
+            <div className="profile-header">
+              <h3>Hồ sơ người dùng</h3>
+              <button
+                className="close-btn"
+                onClick={closePopup}
+              >
+                <MdClose />
+              </button>
+            </div>
+
+            <div
+              className="profile-banner"
+              title="Banner"
+            >
+              {popupUser?.bannerUrl ? (
+                <img src={popupUser.bannerUrl} alt="banner" />
+              ) : (
+                <span>Banner</span>
+              )}
+            </div>
+
+            <div className="profile-body">
+              <div
+                className="profile-avatar-large"
+                title="Avatar"
+              >
+                {popupUser?.avatarUrl ? (
+                  <img src={popupUser.avatarUrl} alt="avatar" />
+                ) : (
+                  (popupUser?.name || 'U').charAt(0).toUpperCase()
+                )}
+              </div>
+
+              <div className="profile-info">
+                <p>
+                  <strong>Tên:</strong> {popupUser?.name || 'Không có tên'}
+                </p>
+                <p>
+                  <strong>Email:</strong> {popupUser?.email || 'Không có email'}
+                </p>
+                <p>
+                  <strong>Ngày sinh:</strong> {formatDate(popupUser?.dateOfBirth) || 'dd/mm/yyyy'}
+                </p>
+                <p>
+                  <strong>Giới tính:</strong> {popupUser?.gender || 'Không có'}
+                </p>
+                <p>
+                  <strong>BIO:</strong> {popupUser?.bio || ''}
+                </p>
+              </div>
+            </div>
+            <div className="profile-footer">
+              <button
+                className="btn btn-cancel"
+                onClick={closePopup}
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showChangePassword && (
         <div className="profile-modal" onClick={() => setShowChangePassword(false)}>
           <div className="profile-content" onClick={(e) => e.stopPropagation()}>
@@ -1090,6 +1810,203 @@ const Home = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Rename Group Modal */}
+      {showRenameModal && (
+        <div className="profile-modal" onClick={() => setShowRenameModal(false)}>
+          <div className="profile-popup" style={{ maxWidth: '400px' }} onClick={e => e.stopPropagation()}>
+            <div className="profile-header">
+              <h2>Đổi tên nhóm</h2>
+              <MdClose className="close-icon" onClick={() => setShowRenameModal(false)} />
+            </div>
+            <div className="profile-content" style={{ padding: '20px' }}>
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Tên nhóm mới</label>
+                <input
+                  type="text"
+                  placeholder="Nhập tên nhóm mới"
+                  value={newGroupName}
+                  onChange={(e) => setNewGroupName(e.target.value)}
+                  autoFocus
+                  onKeyDown={(e) => e.key === 'Enter' && handleSubmitRename()}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #ddd',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  onClick={handleSubmitRename}
+                  style={{
+                    flex: 1,
+                    padding: '10px 20px',
+                    backgroundColor: '#003399',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  Lưu
+                </button>
+                <button
+                  onClick={() => setShowRenameModal(false)}
+                  style={{
+                    flex: 1,
+                    padding: '10px 20px',
+                    backgroundColor: '#e8e8e8',
+                    color: '#333',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  Huỷ
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Group Modal */}
+      {showCreateGroupModal && (
+        <div className="profile-modal" onClick={() => setShowCreateGroupModal(false)}>
+          <div className="profile-popup" style={{ maxHeight: '90vh', minWidth: '400px' }} onClick={e => e.stopPropagation()}>
+            <div className="profile-header">
+              <h2>Tạo nhóm chat</h2>
+              <MdClose className="close-icon" onClick={() => setShowCreateGroupModal(false)} />
+            </div>
+            <div className="profile-content" style={{ padding: '20px' }}>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Tên nhóm</label>
+                <input
+                  type="text"
+                  placeholder="Nhập tên nhóm"
+                  value={groupName}
+                  onChange={(e) => setGroupName(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #ddd',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Chọn bạn bè ({selectedFriendsForGroup.length})</label>
+                <div style={{
+                  border: '1px solid #ddd',
+                  borderRadius: '8px',
+                  maxHeight: '300px',
+                  overflowY: 'auto',
+                  padding: '10px'
+                }}>
+                  {friends.length === 0 ? (
+                    <p style={{ color: '#999' }}>Bạn chưa có bạn bè. Vui lòng thêm bạn bè trước.</p>
+                  ) : (
+                    friends.map(friend => (
+                      <div
+                        key={friend._id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '10px',
+                          borderBottom: '1px solid #f0f0f0',
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => {
+                          setSelectedFriendsForGroup(prev =>
+                            prev.includes(friend._id)
+                              ? prev.filter(id => id !== friend._id)
+                              : [...prev, friend._id]
+                          )
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedFriendsForGroup.includes(friend._id)}
+                          onChange={() => {}}
+                          style={{ marginRight: '10px', cursor: 'pointer' }}
+                        />
+                        <div style={{
+                          width: '40px',
+                          height: '40px',
+                          borderRadius: '50%',
+                          backgroundColor: '#003399',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: 'white',
+                          marginRight: '10px',
+                          flexShrink: 0,
+                          overflow: 'hidden'
+                        }}>
+                          {friend.avatarUrl ? (
+                            <img src={friend.avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            friend.name.charAt(0).toUpperCase()
+                          )}
+                        </div>
+                        <span>{friend.name}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  onClick={handleCreateGroup}
+                  style={{
+                    flex: 1,
+                    padding: '10px 20px',
+                    backgroundColor: '#003399',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    fontSize: '14px'
+                  }}
+                >
+                  Tạo nhóm
+                </button>
+                <button
+                  onClick={() => setShowCreateGroupModal(false)}
+                  style={{
+                    flex: 1,
+                    padding: '10px 20px',
+                    backgroundColor: '#e8e8e8',
+                    color: '#333',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    fontSize: '14px'
+                  }}
+                >
+                  Huỷ
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {devToast && (
+        <div className="dev-toast">Tính năng đang được phát triển</div>
       )}
     </>
   )

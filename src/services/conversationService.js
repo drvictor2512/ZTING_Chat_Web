@@ -66,7 +66,8 @@ const conversationService = {
     try {
       const response = await api.post('/conversations/group/rename', {
         conversationId,
-        newName
+        // backend expects field name "name"
+        name: newName
       })
       return response.data
     } catch (error) {
@@ -123,19 +124,53 @@ const conversationService = {
   },
 
   // Send a message (direct or group)
-  sendMessage: async ({ conversationId, recipientId, content, isGroup = false }) => {
+  sendMessage: async ({ conversationId, recipientId, content, isGroup = false, file }) => {
     try {
       const formData = new FormData()
       if (recipientId) formData.append('recipientId', recipientId)
       if (conversationId) formData.append('conversationId', conversationId)
       if (content !== undefined) formData.append('content', content)
+      if (file) {
+        // Backend cũ (dùng trong Test_Frontend-main) nhận field 'image',
+        // còn backend mới hơn nhận 'file' → gửi cả hai để tương thích.
+        formData.append('file', file)
+        formData.append('image', file)
+      }
       const url = isGroup ? '/messages/group' : '/messages/direct'
-      const response = await api.post(url, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      })
+      const response = await api.post(url, formData)
       return response.data
     } catch (error) {
-      throw error.response?.data || error.message
+      // Extract error message from response or use default
+      const errorData = error.response?.data
+      const errorMessage = errorData?.message || error.message || 'Không thể gửi tin nhắn'
+      const err = new Error(errorMessage)
+      throw err
+    }
+  },
+
+  // Send direct message (matching Test_Frontend-main)
+  sendDirectMessage: async (formData) => {
+    try {
+      const response = await api.post('/messages/direct', formData)
+      return response.data
+    } catch (error) {
+      const errorData = error.response?.data
+      const errorMessage = errorData?.message || error.message || 'Không thể gửi tin nhắn'
+      const err = new Error(errorMessage)
+      throw err
+    }
+  },
+
+  // Send group message (matching Test_Frontend-main)
+  sendGroupMessage: async (formData) => {
+    try {
+      const response = await api.post('/messages/group', formData)
+      return response.data
+    } catch (error) {
+      const errorData = error.response?.data
+      const errorMessage = errorData?.message || error.message || 'Không thể gửi tin nhắn'
+      const err = new Error(errorMessage)
+      throw err
     }
   }
 }
