@@ -33,6 +33,7 @@ const Home = () => {
   const [selectedContact, setSelectedContact] = useState(null)
   const [messages, setMessages] = useState([])
   const [newMessage, setNewMessage] = useState('')
+  const [chatNotice, setChatNotice] = useState('')
   const [showInfoPanel, setShowInfoPanel] = useState(false)
   const [blockedUsers, setBlockedUsers] = useState([])
   const [onlineStatus, setOnlineStatus] = useState({}) // { userId: { status: 'online'|'offline', lastSeen: timestamp } }
@@ -66,6 +67,15 @@ const Home = () => {
   const [friendSortOrder, setFriendSortOrder] = useState('A-Z')
   const [friendMenuOpen, setFriendMenuOpen] = useState(null)
   const [filteredFriends, setFilteredFriends] = useState([])
+
+  // Group list management states
+  const [groupSearchTerm, setGroupSearchTerm] = useState('')
+  const [groupSortOrder, setGroupSortOrder] = useState('A-Z')
+  const [showAddMembersModal, setShowAddMembersModal] = useState(false)
+  const [selectedMembersToAdd, setSelectedMembersToAdd] = useState([])
+  const [showTransferOwnerModal, setShowTransferOwnerModal] = useState(false)
+  const [transferTargetUserId, setTransferTargetUserId] = useState('')
+  const [groupActionLoading, setGroupActionLoading] = useState(false)
   const [friendsView, setFriendsView] = useState('friends-list')
 
   // Check authentication
@@ -180,6 +190,89 @@ const Home = () => {
     }
   }, [])
 
+  // Listen for real-time friend events
+  useEffect(() => {
+    const socket = socketService.getSocket()
+    if (!socket) return
+
+    // Có người gửi lời mời kết bạn đến mình → thêm vào friendRequests
+    const handleFriendRequestReceived = (data) => {
+      const request = data?.request || data
+      if (!request) return
+      setFriendRequests(prev => {
+        const exists = prev.some(r => String(r._id) === String(request._id))
+        if (exists) return prev
+        return [request, ...prev]
+      })
+    }
+
+    // Lời mời mình gửi đi được chấp nhận → cập nhật danh sách bạn & xoá khỏi sentRequests
+    const handleFriendRequestAccepted = (data) => {
+      const newFriend = data?.friend || data?.user || null
+      const requestId = data?.requestId || null
+
+      // Xoá khỏi sentRequests nếu có requestId rõ ràng
+      if (requestId) {
+        setSentRequests(prev => prev.filter(r => String(r._id) !== String(requestId)))
+      }
+
+      // Thêm vào danh sách bạn nếu chưa có
+      if (newFriend && newFriend._id) {
+        setFriends(prev => {
+          const exists = prev.some(f => String(f._id) === String(newFriend._id))
+          if (exists) return prev
+          return [...prev, newFriend]
+        })
+      }
+
+      // Luôn reload để đảm bảo state đúng
+      loadFriendRequests()
+      loadFriends()
+    }
+
+    // Lời mời mình gửi đi bị từ chối → tải lại từ server để đảm bảo chính xác
+    const handleFriendRequestDeclined = (data) => {
+      // Thử filter optimistic trước nếu có requestId rõ ràng
+      const requestId = data?.requestId || null
+      if (requestId) {
+        setSentRequests(prev => prev.filter(r => String(r._id) !== String(requestId)))
+      }
+      // Luôn reload từ server để đảm bảo state đúng
+      loadFriendRequests()
+    }
+
+    // Người kia thu hồi lời mời kết bạn đã gửi cho mình → tải lại từ server
+    const handleFriendRequestCancelled = (data) => {
+      const requestId = data?.requestId || null
+      if (requestId) {
+        setFriendRequests(prev => prev.filter(r => String(r._id) !== String(requestId)))
+      }
+      loadFriendRequests()
+    }
+
+    // Bị người kia hủy kết bạn → xoá khỏi friends
+    const handleFriendRemoved = (data) => {
+      const removedId = data?.userId || data?._id || null
+      if (removedId) {
+        setFriends(prev => prev.filter(f => String(f._id) !== String(removedId)))
+      }
+    }
+
+    socket.on('friend_request_received', handleFriendRequestReceived)
+    socket.on('friend_request_accepted', handleFriendRequestAccepted)
+    socket.on('friend_request_declined', handleFriendRequestDeclined)
+    socket.on('friend_request_cancelled', handleFriendRequestCancelled)
+    socket.on('friend_removed', handleFriendRemoved)
+
+    return () => {
+      socket.off('friend_request_received', handleFriendRequestReceived)
+      socket.off('friend_request_accepted', handleFriendRequestAccepted)
+      socket.off('friend_request_declined', handleFriendRequestDeclined)
+      socket.off('friend_request_cancelled', handleFriendRequestCancelled)
+      socket.off('friend_removed', handleFriendRemoved)
+    }
+  }, [])
+
   // Update filtered contacts based on search term and current view
   useEffect(() => {
     const term = searchTerm.trim().toLowerCase()
@@ -285,10 +378,13 @@ const Home = () => {
         }
       })
       // loại bỏ phần tử null (AI / hội thoại lỗi)
-      setConversations(convs.filter(Boolean))
+      const normalized = convs.filter(Boolean)
+      setConversations(normalized)
+      return normalized
     } catch (err) {
       setError('Không thể tải cuộc trò chuyện')
       console.error(err)
+      return []
     } finally {
       setLoading(false)
     }
@@ -509,9 +605,11 @@ const Home = () => {
   // Watch for selection change or view change
   useEffect(() => {
     if (selectedContact && currentView === 'chat') {
+      setChatNotice('')
       loadMessages(selectedContact._id)
     } else {
       setMessages([])
+      setChatNotice('')
     }
   }, [selectedContact, currentView])
 
@@ -541,15 +639,224 @@ const Home = () => {
     if (!selectedContact) return
     try {
       const res = await conversationService.getInviteLink(selectedContact._id)
-      alert('Link mời: ' + res.link)
+      const rawCode =
+        res?.token ||
+        res?.code ||
+        res?.inviteCode ||
+        res?.data?.token ||
+        res?.data?.code ||
+        res?.data?.inviteCode ||
+        ''
+
+      let parsedCode = String(rawCode || '').trim()
+
+      if (!parsedCode) {
+        const rawLink = res?.link || res?.inviteLink || res?.data?.link || res?.data?.inviteLink || ''
+        const link = String(rawLink || '').trim()
+
+        if (link) {
+          try {
+            const url = new URL(link)
+            parsedCode =
+              url.searchParams.get('token') ||
+              url.searchParams.get('code') ||
+              url.searchParams.get('inviteCode') ||
+              ''
+            if (!parsedCode) {
+              const parts = url.pathname.split('/').filter(Boolean)
+              parsedCode = parts[parts.length - 1] || ''
+            }
+          } catch {
+            const chunks = link.split('/').filter(Boolean)
+            parsedCode = chunks[chunks.length - 1] || ''
+          }
+        }
+      }
+
+      if (!parsedCode) {
+        throw new Error('Không lấy được mã mời nhóm')
+      }
+
+      setInviteCode(parsedCode)
+      setCopyInviteSuccess(false)
+      setShowInviteCodeModal(true)
     } catch (err) {
       console.error('cannot get invite link', err)
-      setError('Không tạo được link mời')
+      setError(err?.message || 'Không tạo được mã mời nhóm')
+    }
+  }
+
+  const handleCopyInviteCode = async () => {
+    if (!inviteCode) return
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(inviteCode)
+      } else {
+        const temp = document.createElement('textarea')
+        temp.value = inviteCode
+        temp.style.position = 'fixed'
+        temp.style.opacity = '0'
+        document.body.appendChild(temp)
+        temp.select()
+        document.execCommand('copy')
+        document.body.removeChild(temp)
+      }
+      setCopyInviteSuccess(true)
+      setTimeout(() => setCopyInviteSuccess(false), 1500)
+    } catch (err) {
+      console.error('copy invite code failed', err)
+      setError('Không thể sao chép mã nhóm')
+    }
+  }
+
+  const normalizeRoleType = (role) => {
+    const r = String(role || '').toLowerCase()
+    if (r.includes('trưởng') || r === 'owner' || r === 'leader' || r === 'admin') return 'OWNER'
+    if (r.includes('phó') || r.includes('deputy') || r === 'vice' || r === 'vice_leader') return 'DEPUTY'
+    return 'MEMBER'
+  }
+
+  const getRoleLabel = (role) => {
+    const type = normalizeRoleType(role)
+    if (type === 'OWNER') return 'Trưởng nhóm'
+    if (type === 'DEPUTY') return 'Phó nhóm'
+    return 'Thành viên'
+  }
+
+  const getMyGroupRoleType = (contact = selectedContact) => {
+    if (!contact?.participants || !user?._id) return 'MEMBER'
+    const me = contact.participants.find(p => {
+      const pId = p.userId?._id || p._id
+      return String(pId) === String(user._id)
+    })
+    return normalizeRoleType(me?.role)
+  }
+
+  const isCurrentUserMemberOfGroup = (contact = selectedContact) => {
+    if (!contact || contact.type !== 'GROUP') return true
+    if (!user?._id) return false
+    return (contact.participants || []).some(p => {
+      const pId = p.userId?._id || p._id
+      return String(pId) === String(user._id)
+    })
+  }
+
+  const isGroupMessagingBlocked = (contact = selectedContact) => {
+    if (!contact || contact.type !== 'GROUP') return false
+    return !isCurrentUserMemberOfGroup(contact) || chatNotice === 'Bạn không phải thành viên nhóm'
+  }
+
+  const refreshSelectedGroup = async (conversationId = selectedContact?._id) => {
+    if (!conversationId) return
+    const convs = await loadConversations()
+    const refreshed = convs.find(c => String(c._id) === String(conversationId))
+    if (refreshed) {
+      setSelectedContact(refreshed)
+    }
+  }
+
+  const handleOpenAddMembersModal = () => {
+    if (!selectedContact || selectedContact.type !== 'GROUP') return
+    setSelectedMembersToAdd([])
+    setShowAddMembersModal(true)
+  }
+
+  const handleAddMembersToGroup = async () => {
+    if (!selectedContact?._id) return
+    if (selectedMembersToAdd.length === 0) {
+      setError('Vui lòng chọn ít nhất 1 thành viên để thêm')
+      return
+    }
+    try {
+      setGroupActionLoading(true)
+      await Promise.all(
+        selectedMembersToAdd.map(userId => conversationService.addGroupMember(selectedContact._id, userId))
+      )
+      setShowAddMembersModal(false)
+      setSelectedMembersToAdd([])
+      await refreshSelectedGroup(selectedContact._id)
+    } catch (err) {
+      console.error('add members failed', err)
+      setError(err?.message || 'Không thể thêm thành viên vào nhóm')
+    } finally {
+      setGroupActionLoading(false)
+    }
+  }
+
+  const handleRemoveGroupMember = async (memberId, memberName) => {
+    if (!selectedContact?._id || !memberId) return
+    if (!window.confirm(`Bạn có chắc muốn xóa ${memberName || 'thành viên này'} khỏi nhóm?`)) return
+    try {
+      setGroupActionLoading(true)
+      await conversationService.removeGroupMember(selectedContact._id, memberId)
+      await refreshSelectedGroup(selectedContact._id)
+    } catch (err) {
+      console.error('remove member failed', err)
+      setError(err?.message || 'Không thể xóa thành viên khỏi nhóm')
+    } finally {
+      setGroupActionLoading(false)
+    }
+  }
+
+  const handlePromoteMember = async (memberId, memberName) => {
+    if (!selectedContact?._id || !memberId) return
+    if (!window.confirm(`Bổ nhiệm ${memberName || 'thành viên này'} làm phó nhóm?`)) return
+    try {
+      setGroupActionLoading(true)
+      await conversationService.promoteToDeputy(selectedContact._id, memberId)
+      await refreshSelectedGroup(selectedContact._id)
+    } catch (err) {
+      console.error('promote failed', err)
+      setError(err?.message || 'Không thể phân quyền phó nhóm')
+    } finally {
+      setGroupActionLoading(false)
+    }
+  }
+
+  const handleDemoteMember = async (memberId, memberName) => {
+    if (!selectedContact?._id || !memberId) return
+    if (!window.confirm(`Thu hồi quyền phó nhóm của ${memberName || 'thành viên này'}?`)) return
+    try {
+      setGroupActionLoading(true)
+      await conversationService.revokeDeputyRole(selectedContact._id, memberId)
+      await refreshSelectedGroup(selectedContact._id)
+    } catch (err) {
+      console.error('demote failed', err)
+      setError(err?.message || 'Không thể thu hồi quyền phó nhóm')
+    } finally {
+      setGroupActionLoading(false)
+    }
+  }
+
+  const handleTransferOwnerAndLeave = async () => {
+    if (!selectedContact?._id || !transferTargetUserId) {
+      setError('Vui lòng chọn thành viên để chuyển quyền')
+      return
+    }
+    try {
+      setGroupActionLoading(true)
+      await conversationService.transferOwner(selectedContact._id, transferTargetUserId)
+      await conversationService.leaveGroup(selectedContact._id)
+      await loadConversations()
+      setSelectedContact(null)
+      setShowInfoPanel(false)
+      setShowTransferOwnerModal(false)
+      setTransferTargetUserId('')
+    } catch (err) {
+      console.error('transfer owner failed', err)
+      setError(err?.message || 'Không thể chuyển quyền và rời nhóm')
+    } finally {
+      setGroupActionLoading(false)
     }
   }
 
   const handleRenameGroup = () => {
     if (!selectedContact) return
+    const myRole = getMyGroupRoleType(selectedContact)
+    if (!(myRole === 'OWNER' || myRole === 'DEPUTY')) {
+      setError('Chỉ phó nhóm hoặc trưởng nhóm mới được đổi tên nhóm')
+      return
+    }
     setNewGroupName(selectedContact.name || '')
     setShowRenameModal(true)
   }
@@ -559,10 +866,14 @@ const Home = () => {
       setError('Vui lòng nhập tên nhóm')
       return
     }
+    const myRole = getMyGroupRoleType(selectedContact)
+    if (!(myRole === 'OWNER' || myRole === 'DEPUTY')) {
+      setError('Chỉ phó nhóm hoặc trưởng nhóm mới được đổi tên nhóm')
+      return
+    }
     try {
       await conversationService.renameGroup(selectedContact._id, newGroupName.trim())
-      await loadConversations()
-      setSelectedContact(prev => ({ ...prev, name: newGroupName.trim() }))
+      await refreshSelectedGroup(selectedContact._id)
       setShowRenameModal(false)
       setNewGroupName('')
     } catch (err) {
@@ -588,6 +899,12 @@ const Home = () => {
   // leave group as a normal member
   const handleLeaveGroup = async () => {
     if (!selectedContact) return
+    const myRole = getMyGroupRoleType(selectedContact)
+    if (myRole === 'OWNER' && (selectedContact.participants?.length || 0) > 1) {
+      setError('Trưởng nhóm cần chuyển quyền trước khi rời nhóm')
+      setShowTransferOwnerModal(true)
+      return
+    }
     if (!window.confirm('Bạn có chắc muốn rời nhóm này?')) return
     try {
       await conversationService.leaveGroup(selectedContact._id)
@@ -611,6 +928,16 @@ const Home = () => {
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false)
   const [selectedFriendsForGroup, setSelectedFriendsForGroup] = useState([])
   const [groupName, setGroupName] = useState('')
+
+  // Join group by code modal
+  const [showJoinGroupModal, setShowJoinGroupModal] = useState(false)
+  const [joinGroupCode, setJoinGroupCode] = useState('')
+  const [joinGroupLoading, setJoinGroupLoading] = useState(false)
+
+  // Group invite code modal (from group conversation info panel)
+  const [showInviteCodeModal, setShowInviteCodeModal] = useState(false)
+  const [inviteCode, setInviteCode] = useState('')
+  const [copyInviteSuccess, setCopyInviteSuccess] = useState(false)
   
   // Rename group modal
   const [showRenameModal, setShowRenameModal] = useState(false)
@@ -673,6 +1000,12 @@ const Home = () => {
       return
     }
 
+    // Guard: if user has been removed from the group, block sending immediately.
+    if (selectedContact?.type === 'GROUP' && !isCurrentUserMemberOfGroup(selectedContact)) {
+      setChatNotice('Bạn không phải thành viên nhóm')
+      return
+    }
+
     try {
       let activeConv = selectedContact
       
@@ -728,6 +1061,7 @@ const Home = () => {
       // Clear input and file
       setNewMessage('')
       setPendingFile(null)
+      setChatNotice('')
       if (fileInputRef2.current) fileInputRef2.current.value = ''
       
       // Update messages if message was created
@@ -787,16 +1121,35 @@ const Home = () => {
       }
     } catch (err) {
       console.error('Lỗi khi gửi tin nhắn', err)
-      setError(err.message || 'Không thể gửi tin nhắn')
+      const msg = err?.message || 'Không thể gửi tin nhắn'
+      const lower = String(msg).toLowerCase()
+      if (lower.includes('không phải thành viên') || lower.includes('not member')) {
+        setChatNotice('Bạn không phải thành viên nhóm')
+      } else {
+        setError(msg)
+      }
     }
   }
 
   // Handle accept friend request
   const handleAcceptRequest = async (requestId) => {
     try {
-      await friendService.acceptFriendRequest(requestId)
-      await loadFriendRequests()
-      await loadFriends()
+      const res = await friendService.acceptFriendRequest(requestId)
+      // Cập nhật local state ngay, không cần gọi lại server
+      const accepted = friendRequests.find(r => String(r._id) === String(requestId))
+      setFriendRequests(prev => prev.filter(r => String(r._id) !== String(requestId)))
+      if (accepted) {
+        const newFriend = accepted.fromUserId || accepted.from || null
+        if (newFriend && newFriend._id) {
+          setFriends(prev => {
+            const exists = prev.some(f => String(f._id) === String(newFriend._id))
+            if (exists) return prev
+            return [...prev, newFriend]
+          })
+        } else {
+          loadFriends()
+        }
+      }
     } catch (err) {
       setError('Không thể chấp nhận yêu cầu kết bạn')
     }
@@ -806,7 +1159,8 @@ const Home = () => {
   const handleDeclineRequest = async (requestId) => {
     try {
       await friendService.declineFriendRequest(requestId)
-      await loadFriendRequests()
+      // Cập nhật local state ngay
+      setFriendRequests(prev => prev.filter(r => String(r._id) !== String(requestId)))
     } catch (err) {
       setError('Không thể từ chối yêu cầu kết bạn')
     }
@@ -824,12 +1178,15 @@ const Home = () => {
   }
 
   // Revoke a sent friend request
-  const handleRevokeRequest = async (requestId) => {
+  const handleRevokeRequest = async (requestId, toUserId) => {
+    if (!requestId) return
     try {
-      await friendService.cancelFriendRequest(requestId)
-      await loadFriendRequests()
+      await friendService.cancelFriendRequest(requestId, toUserId)
+      // Cập nhật local state ngay
+      setSentRequests(prev => prev.filter(r => String(r._id) !== String(requestId)))
     } catch (err) {
       console.error('[Revoke] error:', err)
+      setError('Không thể thu hồi lời mời kết bạn. Vui lòng thử lại.')
     }
   }
 
@@ -879,8 +1236,18 @@ const Home = () => {
   const confirmSendRequest = async () => {
     if (!selectedUserToAdd) return
     try {
-      await friendService.sendFriendRequest(selectedUserToAdd._id, requestMessage.trim())
-      await loadFriendRequests()
+      const res = await friendService.sendFriendRequest(selectedUserToAdd._id, requestMessage.trim())
+      // Thêm lời mời vừa gửi vào sentRequests (nếu backend trả về request object)
+      const newRequest = res?.request || res?.data || null
+      if (newRequest && newRequest._id) {
+        setSentRequests(prev => {
+          const exists = prev.some(r => String(r._id) === String(newRequest._id))
+          if (exists) return prev
+          return [...prev, newRequest]
+        })
+      } else {
+        loadFriendRequests()
+      }
       setSearchResults(prev => prev.map(u => u._id === selectedUserToAdd._id ? { ...u, hasSentRequest: true } : u))
       setShowSendRequestModal(false)
       setShowAddFriendModal(false)
@@ -908,7 +1275,8 @@ const Home = () => {
     if (!window.confirm('Bạn có chắc chắn muốn hủy kết bạn?')) return
     try {
       await friendService.unfriend(userId)
-      await loadFriends()
+      // Cập nhật local state ngay
+      setFriends(prev => prev.filter(f => String(f._id) !== String(userId)))
       if (selectedContact && selectedContact._id === userId) {
         setSelectedContact(null)
       }
@@ -1008,6 +1376,26 @@ const Home = () => {
     }
   }
 
+  const isSystemGroupMessage = (msg) => {
+    if (!msg || selectedContact?.type !== 'GROUP') return false
+
+    if (msg.isSystem || msg.systemMessage) return true
+    const type = String(msg.type || msg.messageType || '').toUpperCase()
+    if (type.includes('SYSTEM')) return true
+
+    const content = String(msg.content || '').toLowerCase()
+    return (
+      content.includes('đã thêm') ||
+      content.includes('đã xóa') ||
+      content.includes('đã rời khỏi nhóm') ||
+      content.includes('đã đổi tên nhóm') ||
+      content.includes('đã được bổ nhiệm') ||
+      content.includes('đã bị thu hồi quyền') ||
+      content.includes('đã tham gia nhóm qua link mời') ||
+      content.includes('đã chuyển quyền')
+    )
+  }
+
   // Handle create group
   const handleCreateGroup = async () => {
     if (!groupName.trim()) {
@@ -1050,10 +1438,19 @@ const Home = () => {
             ) : selectedContact ? (
               <div className="chat-wrapper">
                 <div className="chat-container">
+                  {(() => {
+                    const removedFromGroup = selectedContact?.type === 'GROUP' && !isCurrentUserMemberOfGroup(selectedContact)
+                    if (!removedFromGroup && !chatNotice) return null
+                    return (
+                      <div style={{ padding: '10px 20px', background: '#fff3cd', color: '#7a5b00', borderBottom: '1px solid #ffe58f', fontSize: '13px' }}>
+                        {chatNotice || 'Bạn không phải thành viên nhóm'}
+                      </div>
+                    )
+                  })()}
                   <div className="chat-header">
                     <div className="chat-header-left">
                       <div className="chat-avatar-wrapper">
-                        <div className="chat-avatar">
+                        <div className={`chat-avatar ${selectedContact?.type === 'GROUP' ? 'group-chat-avatar' : ''}`}>
                           {selectedContact?.participantAvatar ? (
                             <img src={selectedContact.participantAvatar} alt="" />
                           ) : selectedContact?.avatarUrl ? (
@@ -1108,13 +1505,28 @@ const Home = () => {
                     ) : (
                       (() => {
                         const groups = []
-                        messages.forEach((msg, idx) => {
+                        messages.forEach((msg) => {
+                          const isSystem = isSystemGroupMessage(msg)
+
+                          if (isSystem) {
+                            groups.push({
+                              isSystem: true,
+                              messages: [msg],
+                              createdAt: msg.createdAt
+                            })
+                            return
+                          }
+
                           const isMine = String(msg.senderId?._id || msg.senderId) === String(user?._id)
-                          const prevMsg = idx > 0 ? messages[idx - 1] : null
-                          const prevIsMine = prevMsg ? String(prevMsg.senderId?._id || prevMsg.senderId) === String(user?._id) : null
-                          const isPrevSameSender = prevMsg && String(prevMsg.senderId?._id || prevMsg.senderId) === String(msg.senderId?._id || msg.senderId) && prevIsMine === isMine
-                          
-                          if (!isPrevSameSender) {
+
+                          const prevGroup = groups.length ? groups[groups.length - 1] : null
+                          const canAppendToPrev =
+                            prevGroup &&
+                            !prevGroup.isSystem &&
+                            String(prevGroup.senderId) === String(msg.senderId?._id || msg.senderId) &&
+                            prevGroup.isMine === isMine
+
+                          if (!canAppendToPrev) {
                             groups.push({
                               senderId: msg.senderId?._id || msg.senderId,
                               senderName: msg.senderId?.name,
@@ -1124,7 +1536,7 @@ const Home = () => {
                               createdAt: msg.createdAt
                             })
                           } else {
-                            groups[groups.length - 1].messages.push(msg)
+                            prevGroup.messages.push(msg)
                           }
                         })
                         
@@ -1140,6 +1552,17 @@ const Home = () => {
                                 {formatDateDivider(group.createdAt)}
                               </div>
                             )
+                          }
+
+                          if (group.isSystem) {
+                            const sysMsg = group.messages[0]
+                            const sysText = sysMsg?.isRecalled ? 'Tin nhắn đã được thu hồi' : (sysMsg?.content || '')
+                            result.push(
+                              <div key={`system-${groupIdx}`} className="system-message-row">
+                                <span className="system-message-pill">{sysText}</span>
+                              </div>
+                            )
+                            return
                           }
                           
                           result.push(
@@ -1260,7 +1683,8 @@ const Home = () => {
                     <input
                       value={newMessage}
                       onChange={e => setNewMessage(e.target.value)}
-                      placeholder="Nhập tin nhắn..."
+                      placeholder={isGroupMessagingBlocked(selectedContact) ? 'Bạn không phải thành viên nhóm' : 'Nhập tin nhắn...'}
+                      disabled={isGroupMessagingBlocked(selectedContact)}
                       onKeyDown={async e => {
                         if (e.key === 'Enter' && !e.shiftKey) {
                           e.preventDefault()
@@ -1269,56 +1693,90 @@ const Home = () => {
                         }
                       }}
                     />
-                    <button onClick={handleSendMessage}>Gửi</button>
+                    <button onClick={handleSendMessage} disabled={isGroupMessagingBlocked(selectedContact)}>
+                      Gửi
+                    </button>
                   </div>
                 </div>
                 {showInfoPanel && selectedContact && (
                   <div className="info-panel">
                     {selectedContact.type === 'GROUP' ? (
-                      <>
-                        <div className="info-header">
-                          <div className="avatar-large">
-                            {(selectedContact.name || '').charAt(0).toUpperCase()}
-                          </div>
-                          <h3>{selectedContact.name}</h3>
-                          <p>{selectedContact.participants?.length || 0} thành viên</p>
-                          <div className="group-actions">
-                            <MdLink className="action-icon" title="Link mới" onClick={handleGetInviteLink} />
-                            <MdEdit className="action-icon" title="Đổi tên nhóm" onClick={handleRenameGroup} />
-                          </div>
-                        </div>
-                        <div className="info-body">
-                          <div className="info-section members">
-                            <h4>Thành viên ({selectedContact.participants?.length || 0})</h4>
-                            {selectedContact.participants?.map(p => {
-                              const userId = p.userId?._id || p._id
-                              const userName = p.userId?.name || p.name || 'User'
-                              const role = p.role || 'Thành viên'
-                              return (
-                                <div className="member-item" key={userId}>
-                                  <span className="member-name">{userName}</span>
-                                  <span className="member-role">{role}</span>
-                                </div>
-                              )
-                            })}
-                          </div>
-                          <div className="info-section">
-                            <h4>Ảnh/Video</h4>
-                          </div>
-                          <div className="info-section">
-                            <h4>File</h4>
-                          </div>
-                          {(() => {
-                            const me = selectedContact.participants?.find(p => String(p._id) === String(user?._id))
-                            const isOwner = me?.role === 'Trưởng nhóm'
-                            return isOwner ? (
-                              <button className="btn-danger" onClick={handleDeleteGroup}>Xóa nhóm</button>
-                            ) : (
-                              <button className="btn-danger" onClick={handleLeaveGroup}>Rời nhóm</button>
-                            )
-                          })()}
-                        </div>
-                      </>
+                      (() => {
+                        const myRoleType = getMyGroupRoleType(selectedContact)
+                        const canRenameGroup = myRoleType === 'OWNER' || myRoleType === 'DEPUTY'
+                        const canManageMembers = myRoleType === 'OWNER' || myRoleType === 'DEPUTY'
+                        const canManageRoles = myRoleType === 'OWNER'
+
+                        return (
+                          <>
+                            <div className="info-header">
+                              <div className="avatar-large group-avatar-large">
+                                {selectedContact.avatarUrl ? (
+                                  <img src={selectedContact.avatarUrl} alt="" />
+                                ) : (
+                                  (selectedContact.name || 'G').charAt(0).toUpperCase()
+                                )}
+                              </div>
+                              <h3>{selectedContact.name}</h3>
+                              <p>{selectedContact.participants?.length || 0} thành viên</p>
+                              <div className="group-actions">
+                                <button className="member-action-btn" onClick={handleOpenAddMembersModal} disabled={groupActionLoading}>Thêm thành viên</button>
+                                <MdLink className="action-icon" title="Mã mời nhóm" onClick={handleGetInviteLink} />
+                                {canRenameGroup && (
+                                  <MdEdit className="action-icon" title="Đổi tên nhóm" onClick={handleRenameGroup} />
+                                )}
+                              </div>
+                            </div>
+                            <div className="info-body">
+                              <div className="info-section members">
+                                <h4>Thành viên ({selectedContact.participants?.length || 0})</h4>
+                                {selectedContact.participants?.map(p => {
+                                  const userId = p.userId?._id || p._id
+                                  const userName = p.userId?.name || p.name || 'User'
+                                  const roleType = normalizeRoleType(p.role)
+                                  const isSelf = String(userId) === String(user?._id)
+                                  const canRemove = canManageMembers && !isSelf && roleType !== 'OWNER'
+                                  const canPromote = canManageRoles && !isSelf && roleType === 'MEMBER'
+                                  const canDemote = canManageRoles && !isSelf && roleType === 'DEPUTY'
+
+                                  return (
+                                    <div className="member-item" key={userId}>
+                                      <div className="member-meta">
+                                        <span className="member-name">{userName}{isSelf ? ' (Bạn)' : ''}</span>
+                                        <span className="member-role">{getRoleLabel(p.role)}</span>
+                                      </div>
+                                      <div className="member-actions-inline">
+                                        {canPromote && (
+                                          <button className="member-action-btn" onClick={() => handlePromoteMember(userId, userName)} disabled={groupActionLoading}>Phó nhóm</button>
+                                        )}
+                                        {canDemote && (
+                                          <button className="member-action-btn member-action-warn" onClick={() => handleDemoteMember(userId, userName)} disabled={groupActionLoading}>Thu hồi quyền</button>
+                                        )}
+                                        {canRemove && (
+                                          <button className="member-action-btn member-action-danger" onClick={() => handleRemoveGroupMember(userId, userName)} disabled={groupActionLoading}>Xóa</button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                              <div className="info-section">
+                                <h4>Ảnh/Video</h4>
+                              </div>
+                              <div className="info-section">
+                                <h4>File</h4>
+                              </div>
+
+                              <div className="group-footer-actions">
+                                <button className="btn-danger" onClick={handleLeaveGroup} disabled={groupActionLoading}>Rời nhóm</button>
+                                {myRoleType === 'OWNER' && (
+                                  <button className="btn-danger" onClick={handleDeleteGroup} disabled={groupActionLoading}>Xóa nhóm</button>
+                                )}
+                              </div>
+                            </div>
+                          </>
+                        )
+                      })()
                     ) : (
                       <>
                         <div className="info-header">
@@ -1380,7 +1838,10 @@ const Home = () => {
                             </div>
                             <div className="fr-card-info">
                               <span className="fr-card-name">{request.fromUserId?.name}</span>
-                              <span className="fr-card-meta">Từ danh thiếp</span>
+                              <span className="fr-card-meta">
+                                {request.createdAt ? new Date(request.createdAt).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) + ' - ' : ''}
+                                Từ danh thiếp
+                              </span>
                             </div>
                             <button
                               className="fr-chat-btn"
@@ -1419,11 +1880,13 @@ const Home = () => {
                               </div>
                               <div className="fr-card-info">
                                 <span className="fr-card-name">{request.toUserId?.name}</span>
-                                <span className="fr-card-meta">Đã gửi lời mời</span>
+                                <span className="fr-card-meta">
+                                  {request.createdAt ? new Date(request.createdAt).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : 'Đã gửi lời mời'}
+                                </span>
                               </div>
                             </div>
                             <div className="fr-card-actions">
-                              <button className="fr-btn-revoke" onClick={() => handleRevokeRequest(request._id)}>Thu hồi lời mời</button>
+                              <button className="fr-btn-revoke" onClick={() => handleRevokeRequest(request._id, request.toUserId?._id || request.toUserId)}>Thu hồi lời mời</button>
                             </div>
                           </div>
                         ))}
@@ -1436,11 +1899,68 @@ const Home = () => {
               <div className="friends-detail-view">
                 <div className="fl-page-header">
                   <MdGroup className="fl-page-icon" />
-                  <h2 className="fl-page-title">Danh sách nhóm và cộng đồng</h2>
+                  <h2 className="fl-page-title">Danh sách nhóm</h2>
                 </div>
-                <div className="empty-state">
-                  <p>Tính năng đang được phát triển</p>
-                </div>
+                {(() => {
+                  const myGroups = conversations.filter(c => c.type === 'GROUP')
+                  const filtered = myGroups
+                    .filter(g => (g.name || '').toLowerCase().includes(groupSearchTerm.toLowerCase()))
+                    .sort((a, b) => groupSortOrder === 'Z-A'
+                      ? (b.name || '').localeCompare(a.name || '', 'vi')
+                      : (a.name || '').localeCompare(b.name || '', 'vi')
+                    )
+                  return (
+                    <>
+                      <div className="fl-sub-header">
+                        Nhóm ({myGroups.length})
+                      </div>
+                      <div className="fl-toolbar">
+                        <div className="fl-search-box">
+                          <svg className="fl-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                          <input
+                            type="text"
+                            placeholder="Tìm nhóm"
+                            value={groupSearchTerm}
+                            onChange={e => setGroupSearchTerm(e.target.value)}
+                            className="fl-search-input"
+                          />
+                        </div>
+                        <select
+                          value={groupSortOrder}
+                          onChange={e => setGroupSortOrder(e.target.value)}
+                          className="fl-sort-select"
+                        >
+                          <option value="A-Z">Tên A-Z</option>
+                          <option value="Z-A">Tên Z-A</option>
+                        </select>
+                      </div>
+                      {filtered.length === 0 ? (
+                        <div className="empty-state">
+                          <p>{groupSearchTerm ? 'Không tìm thấy nhóm nào' : 'Bạn chưa tham gia nhóm nào'}</p>
+                        </div>
+                      ) : (
+                        <div className="fl-list">
+                          {filtered.map(group => (
+                            <div
+                              key={group._id}
+                              className="fl-friend-row"
+                              onClick={() => { handleContactClick(group); setCurrentView('chat') }}
+                            >
+                              <div className="fl-avatar" style={{ backgroundColor: '#003399', fontSize: '16px' }}>
+                                {group.avatarUrl ? (
+                                  <img src={group.avatarUrl} alt={group.name} />
+                                ) : (
+                                  (group.name || 'G').charAt(0).toUpperCase()
+                                )}
+                              </div>
+                              <span className="fl-name">{group.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )
+                })()}
               </div>
             ) : friendsView === 'group-invites' ? (
               <div className="friends-detail-view">
@@ -1632,6 +2152,9 @@ const Home = () => {
           title="Danh bạ"
         >
           <MdContacts />
+          {friendRequests.length > 0 && (
+            <span className="sidebar-badge">{friendRequests.length > 99 ? '99+' : friendRequests.length}</span>
+          )}
         </div>
 
         <div
@@ -1672,7 +2195,7 @@ const Home = () => {
                 <div className="icon" title="Tạo nhóm chat" onClick={() => setShowCreateGroupModal(true)}>
                   <MdPeople />
                 </div>
-                <div className="icon" title="Tham gia nhóm" onClick={() => alert('Tính năng đang được phát triển')}>
+                <div className="icon" title="Tham gia nhóm bằng mã" onClick={() => { setShowJoinGroupModal(true); setJoinGroupCode('') }}>
                   <MdLink />
                 </div>
               </div>
@@ -1694,11 +2217,11 @@ const Home = () => {
                   onClick={() => setFriendsView('group-list')}
                 >
                   <MdGroup className="friends-nav-icon" />
-                  <span>Danh sách nhóm và cộng đồng</span>
+                  <span>Danh sách nhóm</span>
                 </div>
                 <div
                   className={`friends-nav-item ${friendsView === 'friend-requests' ? 'active' : ''}`}
-                  onClick={() => setFriendsView('friend-requests')}
+                  onClick={() => { setFriendsView('friend-requests'); loadFriendRequests() }}
                 >
                   <MdPersonAdd className="friends-nav-icon" />
                   <span>Lời mời kết bạn</span>
@@ -1819,16 +2342,18 @@ const Home = () => {
             />
 
             <div className="profile-body">
-              <div
-                className="profile-avatar-large"
-                onClick={handleAvatarClick}
-                title="Click để đổi avatar"
-              >
-                {user?.avatarUrl ? (
-                  <img src={user.avatarUrl} alt="avatar" />
-                ) : (
-                  (user?.name || 'U').charAt(0).toUpperCase()
-                )}
+              <div className="profile-avatar-wrapper">
+                <div
+                  className="profile-avatar-large"
+                  onClick={handleAvatarClick}
+                  title="Click để đổi avatar"
+                >
+                  {user?.avatarUrl ? (
+                    <img src={user.avatarUrl} alt="avatar" />
+                  ) : (
+                    (user?.name || 'U').charAt(0).toUpperCase()
+                  )}
+                </div>
               </div>
               <input
                 type="file"
@@ -1957,15 +2482,17 @@ const Home = () => {
             </div>
 
             <div className="profile-body">
-              <div
-                className="profile-avatar-large"
-                title="Avatar"
-              >
-                {popupUser?.avatarUrl ? (
-                  <img src={popupUser.avatarUrl} alt="avatar" />
-                ) : (
-                  (popupUser?.name || 'U').charAt(0).toUpperCase()
-                )}
+              <div className="profile-avatar-wrapper">
+                <div
+                  className="profile-avatar-large"
+                  title="Avatar"
+                >
+                  {popupUser?.avatarUrl ? (
+                    <img src={popupUser.avatarUrl} alt="avatar" />
+                  ) : (
+                    (popupUser?.name || 'U').charAt(0).toUpperCase()
+                  )}
+                </div>
               </div>
 
               <div className="profile-info">
@@ -2044,11 +2571,11 @@ const Home = () => {
                     <div className="add-friend-action">
                       {u.isSelf ? (
                         <span className="add-friend-tag">Bạn</span>
-                      ) : u.isFriend ? (
+                      ) : friends.some(f => String(f._id) === String(u._id)) ? (
                         <span className="add-friend-tag">Bạn bè</span>
-                      ) : u.hasSentRequest ? (
+                      ) : sentRequests.some(r => String(r.toUserId?._id || r.toUserId) === String(u._id)) ? (
                         <span className="add-friend-tag">Đã gửi</span>
-                      ) : u.hasReceivedRequest ? (
+                      ) : friendRequests.some(r => String(r.fromUserId?._id || r.fromUserId) === String(u._id)) ? (
                         <button className="fr-btn-accept" onClick={() => handleAcceptRequest(u._id)}>Đồng ý</button>
                       ) : (
                         <button className="fr-btn-accept" onClick={() => handleSendRequestFromModal(u._id, u.name)}>Kết bạn</button>
@@ -2074,13 +2601,13 @@ const Home = () => {
               <p style={{ marginBottom: 8 }}>Gửi lời mời đến <strong>{selectedUserToAdd.name}</strong></p>
               <textarea
                 className="add-friend-input"
-                style={{ resize: 'vertical', minHeight: 80 }}
+                style={{ resize: 'none', height: 80, width: '100%', boxSizing: 'border-box' }}
                 value={requestMessage}
                 onChange={(e) => setRequestMessage(e.target.value)}
               />
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
-                <button className="btn btn-cancel" onClick={() => setShowSendRequestModal(false)}>Hủy</button>
-                <button className="fr-btn-accept" onClick={confirmSendRequest}>Gửi</button>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button className="btn btn-cancel" style={{ flex: 1 }} onClick={() => setShowSendRequestModal(false)}>Hủy</button>
+                <button className="fr-btn-accept" style={{ flex: 1 }} onClick={confirmSendRequest}>Gửi</button>
               </div>
             </div>
           </div>
@@ -2137,6 +2664,125 @@ const Home = () => {
                   onClick={() => setShowChangePassword(false)}
                 >
                   Quay lại
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddMembersModal && (
+        <div className="profile-modal" onClick={() => setShowAddMembersModal(false)}>
+          <div className="profile-popup" style={{ maxHeight: '90vh', width: '480px', maxWidth: '95vw', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
+            <div className="profile-header">
+              <h2>Thêm thành viên vào nhóm</h2>
+              <MdClose className="close-icon" onClick={() => setShowAddMembersModal(false)} />
+            </div>
+            <div className="profile-content" style={{ padding: '20px', overflowY: 'auto', flex: 1, width: '100%', maxWidth: 'none', boxSizing: 'border-box', borderRadius: 0, boxShadow: 'none' }}>
+              {(() => {
+                const inGroupIds = new Set((selectedContact?.participants || []).map(p => String(p.userId?._id || p._id)))
+                const candidates = friends.filter(f => !inGroupIds.has(String(f._id)))
+
+                if (candidates.length === 0) {
+                  return <p style={{ color: '#666' }}>Không còn bạn bè nào để thêm vào nhóm.</p>
+                }
+
+                return (
+                  <div style={{ border: '1px solid #ddd', borderRadius: '8px', maxHeight: '340px', overflowY: 'auto', padding: '10px' }}>
+                    {candidates.map(friend => (
+                      <div
+                        key={friend._id}
+                        style={{ display: 'flex', alignItems: 'center', padding: '10px', borderBottom: '1px solid #f0f0f0', cursor: 'pointer' }}
+                        onClick={() => {
+                          setSelectedMembersToAdd(prev =>
+                            prev.includes(friend._id)
+                              ? prev.filter(id => id !== friend._id)
+                              : [...prev, friend._id]
+                          )
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedMembersToAdd.includes(friend._id)}
+                          onChange={() => {}}
+                          style={{ marginRight: '10px', cursor: 'pointer' }}
+                        />
+                        <div style={{ width: '38px', height: '38px', borderRadius: '50%', backgroundColor: '#003399', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', marginRight: '10px', flexShrink: 0, overflow: 'hidden' }}>
+                          {friend.avatarUrl ? (
+                            <img src={friend.avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            friend.name?.charAt(0).toUpperCase() || 'U'
+                          )}
+                        </div>
+                        <span>{friend.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })()}
+
+              <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+                <button
+                  onClick={handleAddMembersToGroup}
+                  disabled={groupActionLoading}
+                  style={{ flex: 1, padding: '10px 20px', backgroundColor: '#003399', color: 'white', border: 'none', borderRadius: '8px', cursor: groupActionLoading ? 'not-allowed' : 'pointer', fontWeight: 'bold', fontSize: '14px', opacity: groupActionLoading ? 0.7 : 1 }}
+                >
+                  {groupActionLoading ? 'Đang thêm...' : 'Thêm thành viên'}
+                </button>
+                <button
+                  onClick={() => setShowAddMembersModal(false)}
+                  style={{ flex: 1, padding: '10px 20px', backgroundColor: '#e8e8e8', color: '#333', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}
+                >
+                  Huỷ
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTransferOwnerModal && (
+        <div className="profile-modal" onClick={() => setShowTransferOwnerModal(false)}>
+          <div className="profile-popup" style={{ maxWidth: '560px', width: '95vw' }} onClick={e => e.stopPropagation()}>
+            <div className="profile-header">
+              <h2>Chuyển quyền và rời nhóm</h2>
+              <MdClose className="close-icon" onClick={() => setShowTransferOwnerModal(false)} />
+            </div>
+            <div className="profile-content" style={{ padding: '24px', width: '100%', maxWidth: 'none', boxSizing: 'border-box', borderRadius: 0, boxShadow: 'none' }}>
+              <p style={{ margin: '0 0 12px', color: '#666', fontSize: '16px' }}>Chọn thành viên sẽ trở thành trưởng nhóm mới.</p>
+              <div style={{ border: '1px solid #ddd', borderRadius: '12px', maxHeight: '280px', overflowY: 'auto', padding: '8px 12px' }}>
+                {(selectedContact?.participants || [])
+                  .filter(p => String(p.userId?._id || p._id) !== String(user?._id))
+                  .map(p => {
+                    const userId = p.userId?._id || p._id
+                    const userName = p.userId?.name || p.name || 'User'
+                    return (
+                      <label key={userId} style={{ display: 'flex', alignItems: 'center', gap: '12px', minHeight: '56px', padding: '8px 6px', cursor: 'pointer', borderBottom: '1px solid #f0f0f0' }}>
+                        <input
+                          type="radio"
+                          name="transferOwner"
+                          value={userId}
+                          checked={String(transferTargetUserId) === String(userId)}
+                          onChange={() => setTransferTargetUserId(userId)}
+                        />
+                        <span style={{ fontSize: '16px', lineHeight: 1.1 }}>{userName}</span>
+                      </label>
+                    )
+                  })}
+              </div>
+              <div style={{ display: 'flex', gap: '12px', marginTop: '18px' }}>
+                <button
+                  onClick={handleTransferOwnerAndLeave}
+                  disabled={groupActionLoading || !transferTargetUserId}
+                  style={{ flex: 1, minHeight: '50px', padding: '0 16px', backgroundColor: '#003399', color: 'white', border: 'none', borderRadius: '12px', cursor: groupActionLoading || !transferTargetUserId ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: '16px', whiteSpace: 'nowrap', opacity: groupActionLoading || !transferTargetUserId ? 0.7 : 1 }}
+                >
+                  {groupActionLoading ? 'Đang xử lý...' : 'Chuyển quyền & Rời nhóm'}
+                </button>
+                <button
+                  onClick={() => setShowTransferOwnerModal(false)}
+                  style={{ flex: 1, minHeight: '50px', padding: '0 16px', backgroundColor: '#e8e8e8', color: '#333', border: 'none', borderRadius: '12px', cursor: 'pointer', fontWeight: 700, fontSize: '16px' }}
+                >
+                  Huỷ
                 </button>
               </div>
             </div>
@@ -2330,6 +2976,104 @@ const Home = () => {
                   }}
                 >
                   Huỷ
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showJoinGroupModal && (
+        <div className="profile-modal" onClick={() => setShowJoinGroupModal(false)}>
+          <div className="profile-popup" style={{ width: '420px', maxWidth: '95vw' }} onClick={e => e.stopPropagation()}>
+            <div className="profile-header">
+              <h2>Tham gia nhóm bằng mã</h2>
+              <MdClose className="close-icon" onClick={() => setShowJoinGroupModal(false)} />
+            </div>
+            <div className="profile-content" style={{ padding: '20px', width: '100%', maxWidth: 'none', boxSizing: 'border-box', borderRadius: 0, boxShadow: 'none' }}>
+              <p style={{ color: '#555', marginBottom: '14px', fontSize: '14px' }}>Nhập mã mời để tham gia vào nhóm chat.</p>
+              <input
+                type="text"
+                placeholder="Nhập mã nhóm..."
+                value={joinGroupCode}
+                onChange={e => setJoinGroupCode(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && !joinGroupLoading && joinGroupCode.trim() && (async () => {
+                  setJoinGroupLoading(true)
+                  try {
+                    const conv = await conversationService.joinByInvite(joinGroupCode.trim())
+                    setShowJoinGroupModal(false)
+                    await loadConversations()
+                    if (conv?.conversation) setSelectedContact(conv.conversation)
+                  } catch (err) {
+                    setError(err.message || 'Mã nhóm không hợp lệ hoặc đã hết hạn.')
+                  } finally {
+                    setJoinGroupLoading(false)
+                  }
+                })()}
+                style={{ width: '100%', padding: '10px 12px', border: '1px solid #ddd', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box', marginBottom: '16px' }}
+                autoFocus
+              />
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  onClick={async () => {
+                    if (!joinGroupCode.trim() || joinGroupLoading) return
+                    setJoinGroupLoading(true)
+                    try {
+                      const conv = await conversationService.joinByInvite(joinGroupCode.trim())
+                      setShowJoinGroupModal(false)
+                      await loadConversations()
+                      if (conv?.conversation) setSelectedContact(conv.conversation)
+                    } catch (err) {
+                      setError(err.message || 'Mã nhóm không hợp lệ hoặc đã hết hạn.')
+                    } finally {
+                      setJoinGroupLoading(false)
+                    }
+                  }}
+                  disabled={!joinGroupCode.trim() || joinGroupLoading}
+                  style={{ flex: 1, padding: '10px', backgroundColor: joinGroupCode.trim() && !joinGroupLoading ? '#003399' : '#b0b8d1', color: 'white', border: 'none', borderRadius: '8px', cursor: joinGroupCode.trim() && !joinGroupLoading ? 'pointer' : 'not-allowed', fontWeight: 'bold', fontSize: '14px' }}
+                >
+                  {joinGroupLoading ? 'Đang tham gia...' : 'Tham gia'}
+                </button>
+                <button
+                  onClick={() => setShowJoinGroupModal(false)}
+                  style={{ flex: 1, padding: '10px', backgroundColor: '#e8e8e8', color: '#333', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}
+                >
+                  Huỷ
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showInviteCodeModal && (
+        <div className="profile-modal" onClick={() => setShowInviteCodeModal(false)}>
+          <div className="profile-popup" style={{ width: '460px', maxWidth: '95vw' }} onClick={e => e.stopPropagation()}>
+            <div className="profile-header">
+              <h2>Link mời nhóm</h2>
+              <MdClose className="close-icon" onClick={() => setShowInviteCodeModal(false)} />
+            </div>
+            <div className="profile-content" style={{ padding: '18px', width: '100%', maxWidth: 'none', boxSizing: 'border-box', borderRadius: 0, boxShadow: 'none' }}>
+              <p style={{ margin: '0 0 14px', color: '#8a97a8', fontSize: '14px' }}>Chia sẻ mã này để ai cũng có thể tham gia nhóm</p>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#eff2f6', borderRadius: '10px', padding: '10px' }}>
+                <div style={{ flex: 1, fontSize: '22px', fontWeight: 700, letterSpacing: '1px', color: '#1f2a3d', wordBreak: 'break-all' }}>
+                  {inviteCode}
+                </div>
+                <button
+                  onClick={handleCopyInviteCode}
+                  style={{ minWidth: '98px', height: '42px', border: 'none', borderRadius: '10px', background: copyInviteSuccess ? '#18a957' : '#2f67d8', color: '#fff', fontSize: '15px', fontWeight: 700, cursor: 'pointer' }}
+                >
+                  {copyInviteSuccess ? 'Đã chép' : 'Sao chép'}
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '14px' }}>
+                <button
+                  onClick={() => setShowInviteCodeModal(false)}
+                  style={{ width: '94px', height: '40px', border: '1px solid #d7dee9', borderRadius: '10px', background: '#f7f9fc', color: '#7d8796', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}
+                >
+                  Đóng
                 </button>
               </div>
             </div>
