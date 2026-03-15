@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MdChat, MdPeople, MdSmartToy, MdSettings, MdPerson, MdPersonAdd, MdLink, MdLogout, MdEdit, MdClose, MdMenu, MdBlock, MdEmojiEmotions, MdAttachFile } from 'react-icons/md'
+import { MdChat, MdPeople, MdSmartToy, MdSettings, MdPerson, MdPersonAdd, MdLink, MdLogout, MdEdit, MdClose, MdMenu, MdBlock, MdEmojiEmotions, MdAttachFile, MdVideocam, MdSend } from 'react-icons/md'
 import EmojiPicker from 'emoji-picker-react'
 import authService from '../services/authService'
 import conversationService from '../services/conversationService'
@@ -33,10 +33,15 @@ const Home = () => {
   const [selectedContact, setSelectedContact] = useState(null)
   const [messages, setMessages] = useState([])
   const [newMessage, setNewMessage] = useState('')
+  const [showMediaModal, setShowMediaModal] = useState(false)
+  const [mediaModalUrl, setMediaModalUrl] = useState(null)
+  const [mediaModalType, setMediaModalType] = useState('image')
+  const [mediaModalName, setMediaModalName] = useState(null)
   const [showInfoPanel, setShowInfoPanel] = useState(false)
   const [blockedUsers, setBlockedUsers] = useState([])
   const [onlineStatus, setOnlineStatus] = useState({}) // { userId: { status: 'online'|'offline', lastSeen: timestamp } }
   const messagesEndRef = useRef(null)
+  const messageInputRef = useRef(null)
 
   // load list of users blocked by current user
   const loadBlockedUsers = async () => {
@@ -337,6 +342,21 @@ const Home = () => {
     } catch { return d }
   }
 
+  const openMediaModal = (url, type = 'image') => {
+    if (!url) return
+    setMediaModalUrl(url)
+    setMediaModalType(type)
+    setMediaModalName(basenameFromUrl(url) || '')
+    setShowMediaModal(true)
+  }
+
+  const closeMediaModal = () => {
+    setShowMediaModal(false)
+    setMediaModalUrl(null)
+    setMediaModalType('image')
+    setMediaModalName(null)
+  }
+
   const openProfile = async () => {
     setError('')
     // refresh from server to make sure we have latest info
@@ -472,9 +492,39 @@ const Home = () => {
         }
       }
     }
+
+    // Rời phòng cũ (nếu khác cuộc trò chuyện)
+    if (selectedContact?._id && convo._id && selectedContact._id !== convo._id) {
+      socketService.leaveConversation(selectedContact._id)
+    }
+
     setSelectedContact(convo)
     if (currentView !== 'chat') {
       setCurrentView('chat')
+    }
+
+    // Join phòng socket cho cuộc trò chuyện mới
+    if (convo._id) {
+      socketService.joinConversation(convo._id)
+    }
+
+    // Đánh dấu đã đọc để reset số tin nhắn chưa đọc
+    if (convo._id) {
+      try {
+        await conversationService.markAsRead(convo._id)
+        setConversations(prev =>
+          prev.map(c => {
+            if (String(c._id) !== String(convo._id)) return c
+            const uc = { ...(c.unreadCounts || {}) }
+            if (user?._id) {
+              uc[String(user._id)] = 0
+            }
+            return { ...c, unreadCounts: uc }
+          })
+        )
+      } catch (err) {
+        console.error('Không thể đánh dấu đã đọc', err)
+      }
     }
   }
 
@@ -586,6 +636,7 @@ const Home = () => {
   // file and emoji support
   const [pendingFile, setPendingFile] = useState(null)
   const fileInputRef2 = useRef(null)
+  const videoInputRef = useRef(null)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const emojiPickerRef = useRef(null)
   
@@ -607,6 +658,20 @@ const Home = () => {
     const maxSize = 5 * 1024 * 1024
     if (f.size > maxSize) {
       setError('File đính kèm tối đa 5MB. Vui lòng chọn file nhỏ hơn.')
+      e.target.value = ''
+      setPendingFile(null)
+      return
+    }
+    setError('')
+    setPendingFile(f)
+  }
+
+  const handleVideoFileChange = e => {
+    const f = e.target.files && e.target.files[0]
+    if (!f) return
+    const maxSize = 5 * 1024 * 1024
+    if (f.size > maxSize) {
+      setError('Video tối đa 5MB. Vui lòng chọn video nhỏ hơn.')
       e.target.value = ''
       setPendingFile(null)
       return
@@ -696,6 +761,9 @@ const Home = () => {
       setNewMessage('')
       setPendingFile(null)
       if (fileInputRef2.current) fileInputRef2.current.value = ''
+      if (messageInputRef.current) {
+        messageInputRef.current.style.height = 'auto'
+      }
       
       // Update messages if message was created
       if (created && selectedContact && String(created.conversationId) === String(selectedContact._id)) {
@@ -880,6 +948,16 @@ const Home = () => {
     }
   }
 
+  // helper: status text cho 1 user (online/offline + lần cuối online)
+  const getUserStatusText = (userId) => {
+    if (!userId) return ''
+    const status = onlineStatus[String(userId)]
+    if (!status) return ''
+    if (status.status === 'online') return 'Đang hoạt động'
+    if (status.lastSeen) return `${formatRelative(status.lastSeen)}`
+    return 'Ngoại tuyến'
+  }
+
   // helper to check if two dates are different days
   const isDifferentDay = (date1, date2) => {
     if (!date1 || !date2) return true
@@ -938,7 +1016,15 @@ const Home = () => {
                 <div className="chat-container">
                   <div className="chat-header">
                     <div className="chat-header-left">
-                      <div className="chat-avatar-wrapper">
+                      <div
+                        className="chat-avatar-wrapper"
+                        style={{ cursor: selectedContact?.type !== 'GROUP' ? 'pointer' : 'default' }}
+                        onClick={() => {
+                          if (selectedContact?.type !== 'GROUP' && (selectedContact.participantId || selectedContact._id)) {
+                            openUserPopup(selectedContact.participantId || selectedContact._id)
+                          }
+                        }}
+                      >
                         <div className="chat-avatar">
                           {selectedContact?.participantAvatar ? (
                             <img src={selectedContact.participantAvatar} alt="" />
@@ -958,8 +1044,14 @@ const Home = () => {
                       </div>
                       <div className="chat-header-info">
                         <h2>{selectedContact.name || selectedContact.participantName}</h2>
-                        {selectedContact.lastMessageAt && (
-                          <p className="chat-status">{formatRelative(selectedContact.lastMessageAt)}</p>
+                        {selectedContact.type !== 'GROUP' && (
+                          (() => {
+                            const contactId = selectedContact.participantId || selectedContact._id
+                            const text = getUserStatusText(contactId)
+                            return text ? (
+                              <p className="chat-status">{text}</p>
+                            ) : null
+                          })()
                         )}
                       </div>
                     </div>
@@ -1054,29 +1146,39 @@ const Home = () => {
                                         {msg.fileUrl ? (
                                           <>
                                             {isGifUrl(msg.fileUrl) ? (
-                                              <img src={msg.fileUrl} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.fileUrl, '_blank')} />
+                                              <img src={msg.fileUrl} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.fileUrl, 'image')} />
                                             ) : isImageUrl(msg.fileUrl) ? (
-                                              <img src={msg.fileUrl} alt="attachment" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.fileUrl, '_blank')} />
+                                              <img src={msg.fileUrl} alt="attachment" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.fileUrl, 'image')} />
                                             ) : isVideoUrl(msg.fileUrl) ? (
-                                              <video controls className="message-video" style={{ maxWidth: '300px', borderRadius: '8px' }}><source src={msg.fileUrl} /></video>
+                                              <div className="message-video-preview" style={{ position: 'relative', maxWidth: '300px', borderRadius: '8px', cursor: 'pointer', overflow: 'hidden' }} onClick={() => openMediaModal(msg.fileUrl, 'video')}>
+                                                <video src={msg.fileUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
+                                                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.24)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                  <span style={{ fontSize: 26, color: '#fff', fontWeight: 700 }}>▶</span>
+                                                </div>
+                                              </div>
                                             ) : (
                                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                <span className="message-file">📎 {basenameFromUrl(msg.fileUrl)}</span>
-                                                <button onClick={() => downloadFile(msg.fileUrl, basenameFromUrl(msg.fileUrl))} title="Tải về" style={{ background: 'none', border: 'none', color: '#60a5fa', fontSize: 18, lineHeight: 1, cursor: 'pointer', padding: 0 }}>⬇</button>
+                                                <span className="message-file">{basenameFromUrl(msg.fileUrl)}</span>
+                                                <button onClick={() => downloadFile(msg.fileUrl, basenameFromUrl(msg.fileUrl))} title="Tải về" style={{ background: '#eef2ff', border: '1px solid #bfdbfe', color: '#1d4ed8', borderRadius: 6, fontSize: 13, fontWeight: 600, padding: '4px 8px', cursor: 'pointer' }}>⬇ Tải về</button>
                                               </div>
                                             )}
                                             {msg.content && <div style={{ marginTop: 4 }}>{msg.content}</div>}
                                           </>
                                         ) : isGifUrl(msg.content) ? (
-                                          <img src={msg.content} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.content, '_blank')} />
+                                          <img src={msg.content} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.content, 'image')} />
                                         ) : isImageUrl(msg.content) ? (
-                                          <img src={msg.content} alt="image" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.content, '_blank')} />
+                                          <img src={msg.content} alt="image" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.content, 'image')} />
                                         ) : isVideoUrl(msg.content) ? (
-                                          <video controls className="message-video" style={{ maxWidth: '300px', borderRadius: '8px' }}><source src={msg.content} /></video>
+                                          <div className="message-video-preview" style={{ position: 'relative', maxWidth: '300px', borderRadius: '8px', cursor: 'pointer', overflow: 'hidden' }} onClick={() => openMediaModal(msg.content, 'video')}>
+                                            <video src={msg.content} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
+                                            <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.24)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                              <span style={{ fontSize: 26, color: '#fff', fontWeight: 700 }}>▶</span>
+                                            </div>
+                                          </div>
                                         ) : isDocumentUrl(msg.content) ? (
                                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                            <span className="message-file">📎 {basenameFromUrl(msg.content)}</span>
-                                            <button onClick={() => downloadFile(msg.content, basenameFromUrl(msg.content))} title="Tải về" style={{ background: 'none', border: 'none', color: '#60a5fa', fontSize: 18, lineHeight: 1, cursor: 'pointer', padding: 0 }}>⬇</button>
+                                            <span className="message-file">{basenameFromUrl(msg.content)}</span>
+                                            <button onClick={() => downloadFile(msg.content, basenameFromUrl(msg.content))} title="Tải về" style={{ background: '#eef2ff', border: '1px solid #bfdbfe', color: '#1d4ed8', borderRadius: 6, fontSize: 13, fontWeight: 600, padding: '4px 8px', cursor: 'pointer' }}>⬇ Tải về</button>
                                           </div>
                                         ) : (
                                           <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</span>
@@ -1098,64 +1200,109 @@ const Home = () => {
                     )}
                     <div ref={messagesEndRef} />
                   </div>
+
+                  {showMediaModal && mediaModalUrl && (
+                    <div onClick={closeMediaModal} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999, flexDirection: 'column', gap: 16 }}>
+                      <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '80vh' }} onClick={e => e.stopPropagation()}>
+                        {mediaModalType === 'video' ? (
+                          <video src={mediaModalUrl} controls autoPlay style={{ maxWidth: '90vw', maxHeight: '80vh', borderRadius: 8, display: 'block' }} />
+                        ) : (
+                          <img src={mediaModalUrl} alt={mediaModalName || 'media'} style={{ maxWidth: '90vw', maxHeight: '80vh', objectFit: 'contain', borderRadius: 8, display: 'block' }} />
+                        )}
+                        <button onClick={closeMediaModal} title="Đóng" style={{ position: 'absolute', top: -12, right: -12, background: 'rgba(0,0,0,0.6)', border: 'none', color: '#fff', borderRadius: '50%', width: 32, height: 32, fontSize: 18, cursor: 'pointer' }}>✕</button>
+                      </div>
+                      <button onClick={() => downloadFile(mediaModalUrl, mediaModalName || 'download')} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#1d4ed8', color: '#fff', padding: '8px 20px', borderRadius: 8, border: 'none', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>⬇ Tải về</button>
+                    </div>
+                  )}
+
                   <div className="chat-input">
                     {pendingFile && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, padding: '4px 8px', background: '#f1f5f9', borderRadius: 8, width: '100%' }}>
-                        <span style={{ fontSize: 13, color: '#334155' }}>📎 {pendingFile.name}</span>
-                        <button 
-                          onClick={() => { 
+                      <div className="chat-file-preview">
+                        <span className="chat-file-preview-name">{pendingFile.name}</span>
+                        <button
+                          onClick={() => {
                             setPendingFile(null)
                             if (fileInputRef2.current) fileInputRef2.current.value = ''
-                          }} 
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 16, lineHeight: 1, marginLeft: 'auto' }}
+                            if (videoInputRef.current) videoInputRef.current.value = ''
+                          }}
+                          className="chat-file-preview-remove"
                         >
                           ✕
                         </button>
                       </div>
                     )}
-                    <button 
-                      className="icon-btn emoji-btn" 
-                      title="Emoji"
-                      onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                    >
-                      <MdEmojiEmotions />
-                    </button>
-                    {showEmojiPicker && (
-                      <div className="emoji-picker-container" ref={emojiPickerRef}>
-                        <EmojiPicker 
-                          onEmojiClick={(emojiData) => {
-                            const emoji = emojiData?.emoji || emojiData
-                            setNewMessage(prev => prev + (emoji || ''))
-                            setShowEmojiPicker(false)
-                          }}
-                          width="100%"
-                          height={400}
-                        />
-                      </div>
-                    )}
-                    <input
-                      ref={fileInputRef2}
-                      type="file"
-                      accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
-                      style={{ display: 'none' }}
-                      onChange={handleFileChange}
-                    />
-                    <button className="icon-btn attach-btn" onClick={() => fileInputRef2.current?.click()} title="Đính kèm">
-                      <MdAttachFile />
-                    </button>
-                    <input
-                      value={newMessage}
-                      onChange={e => setNewMessage(e.target.value)}
-                      placeholder="Nhập tin nhắn..."
-                      onKeyDown={async e => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault()
-                          if (!newMessage.trim() && !pendingFile) return
-                          await handleSendMessage()
-                        }
-                      }}
-                    />
-                    <button onClick={handleSendMessage}>Gửi</button>
+                    <div className="chat-input-row">
+                      <button 
+                        className="icon-btn emoji-btn" 
+                        title="Emoji"
+                        onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                      >
+                        <MdEmojiEmotions />
+                      </button>
+                      {showEmojiPicker && (
+                        <div className="emoji-picker-container" ref={emojiPickerRef}>
+                          <EmojiPicker 
+                            onEmojiClick={(emojiData) => {
+                              const emoji = emojiData?.emoji || emojiData
+                              setNewMessage(prev => prev + (emoji || ''))
+                              setShowEmojiPicker(false)
+                            }}
+                            width="100%"
+                            height={400}
+                          />
+                        </div>
+                      )}
+                      <input
+                        ref={fileInputRef2}
+                        type="file"
+                        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
+                        style={{ display: 'none' }}
+                        onChange={handleFileChange}
+                      />
+                      <button className="icon-btn attach-btn" onClick={() => fileInputRef2.current?.click()} title="Đính kèm file">
+                        <MdAttachFile />
+                      </button>
+                      <input
+                        ref={videoInputRef}
+                        type="file"
+                        accept="video/*"
+                        style={{ display: 'none' }}
+                        onChange={handleVideoFileChange}
+                      />
+                      <button className="icon-btn video-btn" onClick={() => videoInputRef.current?.click()} title="Gửi video">
+                        <MdVideocam />
+                      </button>
+                      <textarea
+                        ref={messageInputRef}
+                        value={newMessage}
+                        rows={1}
+                        placeholder="Nhập tin nhắn..."
+                        onChange={e => {
+                          const val = e.target.value
+                          setNewMessage(val)
+                          if (messageInputRef.current) {
+                            messageInputRef.current.style.height = 'auto'
+                            const height = Math.min(messageInputRef.current.scrollHeight, 180)
+                            messageInputRef.current.style.height = `${height}px`
+                          }
+                        }}
+                        onKeyDown={async e => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault()
+                            if (!newMessage.trim() && !pendingFile) return
+                            await handleSendMessage()
+                          }
+                        }}
+                        onInput={() => {
+                          if (messageInputRef.current) {
+                            messageInputRef.current.style.height = 'auto'
+                            const height = Math.min(messageInputRef.current.scrollHeight, 180)
+                            messageInputRef.current.style.height = `${height}px`
+                          }
+                        }}
+                      />
+                      <button onClick={handleSendMessage} className="chat-send-button"><MdSend style={{ marginRight: 6, fontSize: 18 }} />Gửi</button>
+                    </div>
                   </div>
                 </div>
                 {showInfoPanel && selectedContact && (
@@ -1212,9 +1359,13 @@ const Home = () => {
                             {(selectedContact.participantName || selectedContact.name || 'U').charAt(0).toUpperCase()}
                           </div>
                           <h3>{selectedContact.participantName || selectedContact.name}</h3>
-                          {selectedContact.lastMessageAt && (
-                            <p className="info-status">{formatRelative(selectedContact.lastMessageAt)}</p>
-                          )}
+                          {(() => {
+                            const contactId = selectedContact.participantId || selectedContact._id
+                            const text = getUserStatusText(contactId)
+                            return text ? (
+                              <p className="info-status">{text}</p>
+                            ) : null
+                          })()}
                           <button className="btn-block" onClick={toggleBlock}>
                             {blockedUsers.includes(selectedContact.participantId) ? 'Bỏ chặn' : 'Chặn'}
                           </button>
@@ -1480,7 +1631,7 @@ const Home = () => {
                 <p>Không tìm thấy liên hệ nào</p>
               </div>
             ) : (
-              filteredContacts
+            filteredContacts
                 // bỏ qua các item không có tên hiển thị để tránh dòng trống
                 .filter(contact => (contact.name || contact.participantName || contact.groupId?.name || contact.email))
                 .map(contact => {
@@ -1490,6 +1641,15 @@ const Home = () => {
                   const isGroup = contact.type === 'GROUP'
                   const userStatus = !isGroup && userId ? onlineStatus[String(userId)] : null
                   const isOnline = userStatus?.status === 'online'
+                  const isConversation = !!contact.type || !!contact.participantId
+                  const lastTime = isConversation
+                    ? (contact.lastMessageAt || contact.lastMessage?.createdAt)
+                    : null
+                  const lastTimeText = lastTime ? formatRelative(lastTime) : ''
+                  const unread = isConversation && contact.unreadCounts && user?._id
+                    ? (contact.unreadCounts[String(user._id)] || 0)
+                    : 0
+                  const unreadText = unread > 99 ? '99+' : String(unread)
                   
                   return (
                     <div
@@ -1519,11 +1679,30 @@ const Home = () => {
                         )}
                       </div>
                       <div className="contact-info">
-                        <span className="name">
-                          {displayName}
-                        </span>
+                        <div className="contact-title-row">
+                          <span className="name">
+                            {displayName}
+                          </span>
+                          {(lastTimeText || unread > 0) && (
+                            <div className="contact-meta-right">
+                              {lastTimeText && (
+                                <span className="contact-time">
+                                  {lastTimeText}
+                                </span>
+                              )}
+                              {unread > 0 && (
+                                <span className="unread-badge">
+                                  {unreadText}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
                         <span className="last-message">
-                          {contact.lastMessage?.content || 'Không có tin nhắn'}
+                          {contact.lastMessage?.isRecalled
+                            ? 'Tin nhắn đã được thu hồi'
+                            : (contact.lastMessage?.content ||
+                              (!isConversation ? (contact.email || '') : 'Không có tin nhắn'))}
                         </span>
                       </div>
                     </div>
