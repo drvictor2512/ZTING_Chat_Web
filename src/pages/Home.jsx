@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MdChat, MdPeople, MdSmartToy, MdSettings, MdPerson, MdPersonAdd, MdLink, MdLogout, MdEdit, MdClose, MdMenu, MdBlock, MdEmojiEmotions, MdAttachFile, MdVideocam, MdSend } from 'react-icons/md'
+import { MdChat, MdContacts, MdPeople, MdSmartToy, MdSettings, MdPerson, MdPersonAdd, MdLink, MdLogout, MdEdit, MdClose, MdMenu, MdBlock, MdEmojiEmotions, MdAttachFile, MdVideocam, MdSend } from 'react-icons/md'
 import EmojiPicker from 'emoji-picker-react'
 import authService from '../services/authService'
 import conversationService from '../services/conversationService'
@@ -23,6 +23,7 @@ const Home = () => {
   const [searchTerm, setSearchTerm] = useState('')
   const [filteredContacts, setFilteredContacts] = useState([])
   const [loading, setLoading] = useState(false)
+  const [chatNotice, setChatNotice] = useState('')
   const [error, setError] = useState('')
   const [showUserProfile, setShowUserProfile] = useState(false)
   const [popupUser, setPopupUser] = useState(null)
@@ -1768,13 +1769,57 @@ const Home = () => {
                         </button>
                       </div>
                     )}
-                    <button
-                      className="icon-btn emoji-btn"
-                      title="Emoji"
-                      onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                    >
-                      <MdEmojiEmotions />
-                    </button>
+
+                    <div className="chat-input-row">
+                      <div className="chat-input-left-icons">
+                        <button
+                          className="icon-btn emoji-btn"
+                          title="Emoji"
+                          onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                        >
+                          <MdEmojiEmotions />
+                        </button>
+                        <input
+                          ref={fileInputRef2}
+                          type="file"
+                          accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
+                          style={{ display: 'none' }}
+                          onChange={handleFileChange}
+                        />
+                        <button className="icon-btn attach-btn" onClick={() => fileInputRef2.current?.click()} title="Đính kèm">
+                          <MdAttachFile />
+                        </button>
+                        <button className="icon-btn video-btn" onClick={() => videoInputRef.current?.click()} title="Gửi video">
+                          <MdVideocam />
+                        </button>
+                        <input
+                          ref={videoInputRef}
+                          type="file"
+                          accept="video/*"
+                          style={{ display: 'none' }}
+                          onChange={handleFileChange}
+                        />
+                      </div>
+
+                      <input
+                        className="chat-text-input"
+                        value={newMessage}
+                        onChange={e => setNewMessage(e.target.value)}
+                        placeholder="Nhập tin nhắn..."
+                        onKeyDown={async e => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault()
+                            if (!newMessage.trim() && !pendingFile) return
+                            await handleSendMessage()
+                          }
+                        }}
+                      />
+
+                      <button className="chat-send-button" onClick={handleSendMessage}>
+                        <MdSend /> Gửi
+                      </button>
+                    </div>
+
                     {showEmojiPicker && (
                       <div className="emoji-picker-container" ref={emojiPickerRef}>
                         <EmojiPicker
@@ -1788,29 +1833,6 @@ const Home = () => {
                         />
                       </div>
                     )}
-                    <input
-                      ref={fileInputRef2}
-                      type="file"
-                      accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
-                      style={{ display: 'none' }}
-                      onChange={handleFileChange}
-                    />
-                    <button className="icon-btn attach-btn" onClick={() => fileInputRef2.current?.click()} title="Đính kèm">
-                      <MdAttachFile />
-                    </button>
-                    <input
-                      value={newMessage}
-                      onChange={e => setNewMessage(e.target.value)}
-                      placeholder="Nhập tin nhắn..."
-                      onKeyDown={async e => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault()
-                          if (!newMessage.trim() && !pendingFile) return
-                          await handleSendMessage()
-                        }
-                      }}
-                    />
-                    <button onClick={handleSendMessage}>Gửi</button>
                   </div>
                 </div>
                 {showInfoPanel && selectedContact && (
