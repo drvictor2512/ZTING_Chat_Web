@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MdChat, MdPeople, MdSmartToy, MdSettings, MdPerson, MdPersonAdd, MdLink, MdLogout, MdEdit, MdClose, MdMenu, MdBlock, MdEmojiEmotions, MdAttachFile, MdGroup, MdEmail, MdContacts } from 'react-icons/md'
+import { MdChat, MdPeople, MdSmartToy, MdSettings, MdPerson, MdPersonAdd, MdLink, MdLogout, MdEdit, MdClose, MdMenu, MdBlock, MdEmojiEmotions, MdAttachFile, MdVideocam, MdSend } from 'react-icons/md'
 import EmojiPicker from 'emoji-picker-react'
 import authService from '../services/authService'
 import conversationService from '../services/conversationService'
@@ -33,11 +33,15 @@ const Home = () => {
   const [selectedContact, setSelectedContact] = useState(null)
   const [messages, setMessages] = useState([])
   const [newMessage, setNewMessage] = useState('')
-  const [chatNotice, setChatNotice] = useState('')
+  const [showMediaModal, setShowMediaModal] = useState(false)
+  const [mediaModalUrl, setMediaModalUrl] = useState(null)
+  const [mediaModalType, setMediaModalType] = useState('image')
+  const [mediaModalName, setMediaModalName] = useState(null)
   const [showInfoPanel, setShowInfoPanel] = useState(false)
   const [blockedUsers, setBlockedUsers] = useState([])
   const [onlineStatus, setOnlineStatus] = useState({}) // { userId: { status: 'online'|'offline', lastSeen: timestamp } }
   const messagesEndRef = useRef(null)
+  const messageInputRef = useRef(null)
 
   // load list of users blocked by current user
   const loadBlockedUsers = async () => {
@@ -90,7 +94,7 @@ const Home = () => {
     loadFriends()
     loadFriendRequests()
     loadBlockedUsers()
-    
+
     // Connect to socket
     const userId = user?._id
     if (userId) {
@@ -331,7 +335,7 @@ const Home = () => {
         let participantId = null
         let participantName = ''
         let participantAvatar = ''
-        
+
         if (c.type === 'DIRECT' && c.participants && c.participants.length === 2) {
           const other = c.participants.find(p => {
             // Handle both cases: p._id (direct) and p.userId._id (populated)
@@ -451,6 +455,21 @@ const Home = () => {
     } catch { return d }
   }
 
+  const openMediaModal = (url, type = 'image') => {
+    if (!url) return
+    setMediaModalUrl(url)
+    setMediaModalType(type)
+    setMediaModalName(basenameFromUrl(url) || '')
+    setShowMediaModal(true)
+  }
+
+  const closeMediaModal = () => {
+    setShowMediaModal(false)
+    setMediaModalUrl(null)
+    setMediaModalType('image')
+    setMediaModalName(null)
+  }
+
   const openProfile = async () => {
     setError('')
     // refresh from server to make sure we have latest info
@@ -461,7 +480,7 @@ const Home = () => {
       localStorage.setItem('user', JSON.stringify(latest))
       setProfileForm({
         name: latest.name || '',
-        dateOfBirth: latest.dateOfBirth ? new Date(latest.dateOfBirth).toISOString().slice(0,10) : '',
+        dateOfBirth: latest.dateOfBirth ? new Date(latest.dateOfBirth).toISOString().slice(0, 10) : '',
         gender: latest.gender || '',
         bio: latest.bio || ''
       })
@@ -476,7 +495,7 @@ const Home = () => {
     if (user) {
       setProfileForm({
         name: user.name || '',
-        dateOfBirth: user.dateOfBirth ? new Date(user.dateOfBirth).toISOString().slice(0,10) : '',
+        dateOfBirth: user.dateOfBirth ? new Date(user.dateOfBirth).toISOString().slice(0, 10) : '',
         gender: user.gender || '',
         bio: user.bio || ''
       })
@@ -586,9 +605,39 @@ const Home = () => {
         }
       }
     }
+
+    // Rời phòng cũ (nếu khác cuộc trò chuyện)
+    if (selectedContact?._id && convo._id && selectedContact._id !== convo._id) {
+      socketService.leaveConversation(selectedContact._id)
+    }
+
     setSelectedContact(convo)
     if (currentView !== 'chat') {
       setCurrentView('chat')
+    }
+
+    // Join phòng socket cho cuộc trò chuyện mới
+    if (convo._id) {
+      socketService.joinConversation(convo._id)
+    }
+
+    // Đánh dấu đã đọc để reset số tin nhắn chưa đọc
+    if (convo._id) {
+      try {
+        await conversationService.markAsRead(convo._id)
+        setConversations(prev =>
+          prev.map(c => {
+            if (String(c._id) !== String(convo._id)) return c
+            const uc = { ...(c.unreadCounts || {}) }
+            if (user?._id) {
+              uc[String(user._id)] = 0
+            }
+            return { ...c, unreadCounts: uc }
+          })
+        )
+      } catch (err) {
+        console.error('Không thể đánh dấu đã đọc', err)
+      }
     }
   }
 
@@ -860,7 +909,7 @@ const Home = () => {
     setNewGroupName(selectedContact.name || '')
     setShowRenameModal(true)
   }
-  
+
   const handleSubmitRename = async () => {
     if (!newGroupName.trim()) {
       setError('Vui lòng nhập tên nhóm')
@@ -921,9 +970,10 @@ const Home = () => {
   // file and emoji support
   const [pendingFile, setPendingFile] = useState(null)
   const fileInputRef2 = useRef(null)
+  const videoInputRef = useRef(null)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const emojiPickerRef = useRef(null)
-  
+
   // Create group modal
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false)
   const [selectedFriendsForGroup, setSelectedFriendsForGroup] = useState([])
@@ -938,7 +988,7 @@ const Home = () => {
   const [showInviteCodeModal, setShowInviteCodeModal] = useState(false)
   const [inviteCode, setInviteCode] = useState('')
   const [copyInviteSuccess, setCopyInviteSuccess] = useState(false)
-  
+
   // Rename group modal
   const [showRenameModal, setShowRenameModal] = useState(false)
   const [newGroupName, setNewGroupName] = useState('')
@@ -952,6 +1002,20 @@ const Home = () => {
     const maxSize = 5 * 1024 * 1024
     if (f.size > maxSize) {
       setError('File đính kèm tối đa 5MB. Vui lòng chọn file nhỏ hơn.')
+      e.target.value = ''
+      setPendingFile(null)
+      return
+    }
+    setError('')
+    setPendingFile(f)
+  }
+
+  const handleVideoFileChange = e => {
+    const f = e.target.files && e.target.files[0]
+    if (!f) return
+    const maxSize = 5 * 1024 * 1024
+    if (f.size > maxSize) {
+      setError('Video tối đa 5MB. Vui lòng chọn video nhỏ hơn.')
       e.target.value = ''
       setPendingFile(null)
       return
@@ -1008,13 +1072,13 @@ const Home = () => {
 
     try {
       let activeConv = selectedContact
-      
+
       // If conversation doesn't exist yet, create it first
       if (!activeConv._id && activeConv.participantId) {
         try {
-          const created = await conversationService.createConversation({ 
-            type: 'DIRECT', 
-            memberIds: [activeConv.participantId] 
+          const created = await conversationService.createConversation({
+            type: 'DIRECT',
+            memberIds: [activeConv.participantId]
           })
           await loadConversations()
           const freshList = await conversationService.getConversations()
@@ -1032,7 +1096,7 @@ const Home = () => {
       const content = newMessage.trim()
       if (content) form.append('content', content)
       if (activeConv?._id) form.append('conversationId', activeConv._id)
-      
+
       // For direct messages, append recipientId
       if (activeConv?.type === 'DIRECT') {
         const otherParticipant = activeConv.participants?.find(p => {
@@ -1046,75 +1110,78 @@ const Home = () => {
           form.append('recipientId', activeConv.participantId)
         }
       }
-      
+
       // Append file as 'image' field (matching Test_Frontend-main)
       if (pendingFile) form.append('image', pendingFile)
 
       // Send message
       const isGroup = activeConv?.type === 'GROUP'
-      let res = isGroup 
+      let res = isGroup
         ? await conversationService.sendGroupMessage(form)
         : await conversationService.sendDirectMessage(form)
-      
+
       let created = res?.message || null
-      
+
       // Clear input and file
       setNewMessage('')
       setPendingFile(null)
       setChatNotice('')
       if (fileInputRef2.current) fileInputRef2.current.value = ''
-      
+      if (messageInputRef.current) {
+        messageInputRef.current.style.height = 'auto'
+      }
+
       // Update messages if message was created
       if (created && selectedContact && String(created.conversationId) === String(selectedContact._id)) {
         try {
           // Populate senderId if it's just an ID
           if (created.senderId && typeof created.senderId !== 'object') {
             if (String(created.senderId) === String(user?._id)) {
-              created.senderId = { 
-                _id: created.senderId, 
-                name: user.name, 
-                avatarUrl: user.avatarUrl 
+              created.senderId = {
+                _id: created.senderId,
+                name: user.name,
+                avatarUrl: user.avatarUrl
               }
             } else {
-              created.senderId = { 
-                _id: created.senderId, 
-                name: created.senderName || 'Người dùng', 
-                avatarUrl: created.senderAvatar 
+              created.senderId = {
+                _id: created.senderId,
+                name: created.senderName || 'Người dùng',
+                avatarUrl: created.senderAvatar
               }
             }
           }
         } catch (e) { }
-        
+
         // Add message to list if not already present (socket will also add it, so this prevents duplicate)
         setMessages(prev => {
           const exists = prev.some(m => String(m._id) === String(created._id))
           if (exists) return prev
           return [...prev, created]
         })
-        
+
         // Update conversation list
         setConversations(prev => {
           const convId = String(created.conversationId)
           const idx = prev.findIndex(c => String(c._id) === convId)
           if (idx === -1) {
-            loadConversations().catch(() => {})
+            loadConversations().catch(() => { })
             return prev
           }
           const updated = [...prev]
-          const conv = { 
-            ...updated[idx], 
-            lastMessage: created, 
-            lastMessageAt: created.createdAt || new Date().toISOString() 
+          const conv = {
+            ...updated[idx],
+            lastMessage: created,
+            lastMessageAt: created.createdAt || new Date().toISOString()
           }
           updated.splice(idx, 1)
           updated.unshift(conv)
           return updated
         })
       }
-      
+
       // Reload conversations to ensure sidebar is updated
       await loadConversations()
-      
+
       // If conversation was just created, update selected contact id
       if (!activeConv._id && created?.conversationId) {
         setSelectedContact(prev => ({ ...prev, _id: created.conversationId }))
@@ -1305,14 +1372,14 @@ const Home = () => {
       today.setHours(0, 0, 0, 0)
       const msgDate = new Date(d)
       msgDate.setHours(0, 0, 0, 0)
-      
+
       const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      
+
       // Nếu là hôm nay, hiển thị "Hôm nay" + giờ
       if (msgDate.getTime() === today.getTime()) {
         return `Hôm nay ${timeStr}`
       }
-      
+
       // Nếu không phải hôm nay, hiển thị ngày/tháng + giờ
       const dateStr = d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })
       return `${dateStr} ${timeStr}`
@@ -1345,21 +1412,31 @@ const Home = () => {
       today.setHours(0, 0, 0, 0)
       const msgDateOnly = new Date(msgDate)
       msgDateOnly.setHours(0, 0, 0, 0)
-      
+
       if (msgDateOnly.getTime() === today.getTime()) {
         return 'Hôm nay'
       }
-      
+
       const yesterday = new Date(today)
       yesterday.setDate(yesterday.getDate() - 1)
       if (msgDateOnly.getTime() === yesterday.getTime()) {
         return 'Hôm qua'
       }
-      
+
       return msgDate.toLocaleDateString('vi-VN', { day: 'numeric', month: 'numeric', year: 'numeric' })
     } catch {
       return ''
     }
+  }
+
+  // helper: status text cho 1 user (online/offline + lần cuối online)
+  const getUserStatusText = (userId) => {
+    if (!userId) return ''
+    const status = onlineStatus[String(userId)]
+    if (!status) return ''
+    if (status.status === 'online') return 'Đang hoạt động'
+    if (status.lastSeen) return `${formatRelative(status.lastSeen)}`
+    return 'Ngoại tuyến'
   }
 
   // helper to check if two dates are different days
@@ -1449,8 +1526,16 @@ const Home = () => {
                   })()}
                   <div className="chat-header">
                     <div className="chat-header-left">
-                      <div className="chat-avatar-wrapper">
-                        <div className={`chat-avatar ${selectedContact?.type === 'GROUP' ? 'group-chat-avatar' : ''}`}>
+                      <div
+                        className="chat-avatar-wrapper"
+                        style={{ cursor: selectedContact?.type !== 'GROUP' ? 'pointer' : 'default' }}
+                        onClick={() => {
+                          if (selectedContact?.type !== 'GROUP' && (selectedContact.participantId || selectedContact._id)) {
+                            openUserPopup(selectedContact.participantId || selectedContact._id)
+                          }
+                        }}
+                      >
+                        <div className="chat-avatar">
                           {selectedContact?.participantAvatar ? (
                             <img src={selectedContact.participantAvatar} alt="" />
                           ) : selectedContact?.avatarUrl ? (
@@ -1469,8 +1554,14 @@ const Home = () => {
                       </div>
                       <div className="chat-header-info">
                         <h2>{selectedContact.name || selectedContact.participantName}</h2>
-                        {selectedContact.lastMessageAt && (
-                          <p className="chat-status">{formatRelative(selectedContact.lastMessageAt)}</p>
+                        {selectedContact.type !== 'GROUP' && (
+                          (() => {
+                            const contactId = selectedContact.participantId || selectedContact._id
+                            const text = getUserStatusText(contactId)
+                            return text ? (
+                              <p className="chat-status">{text}</p>
+                            ) : null
+                          })()
                         )}
                       </div>
                     </div>
@@ -1489,8 +1580,8 @@ const Home = () => {
                         return fromId === contactId;
                       });
                       return (
-                        <>                        
-                              {isFriend && (
+                        <>
+                          {isFriend && (
                             <button className="btn-unfriend" onClick={() => handleUnfriend(contactId)}>
                               Huỷ kết bạn
                             </button>
@@ -1539,13 +1630,13 @@ const Home = () => {
                             prevGroup.messages.push(msg)
                           }
                         })
-                        
+
                         const result = []
                         groups.forEach((group, groupIdx) => {
                           // Add date divider if this is the first message or if date changed
                           const prevGroup = groupIdx > 0 ? groups[groupIdx - 1] : null
                           const showDateDivider = !prevGroup || isDifferentDay(group.createdAt, prevGroup.createdAt)
-                          
+
                           if (showDateDivider && group.createdAt) {
                             result.push(
                               <div key={`divider-${groupIdx}`} className="date-divider">
@@ -1564,7 +1655,7 @@ const Home = () => {
                             )
                             return
                           }
-                          
+
                           result.push(
                             <div key={`group-${groupIdx}`} className={`message-group ${group.isMine ? 'sent-group' : 'received-group'}`}>
                               {!group.isMine && (
@@ -1591,29 +1682,39 @@ const Home = () => {
                                         {msg.fileUrl ? (
                                           <>
                                             {isGifUrl(msg.fileUrl) ? (
-                                              <img src={msg.fileUrl} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.fileUrl, '_blank')} />
+                                              <img src={msg.fileUrl} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.fileUrl, 'image')} />
                                             ) : isImageUrl(msg.fileUrl) ? (
-                                              <img src={msg.fileUrl} alt="attachment" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.fileUrl, '_blank')} />
+                                              <img src={msg.fileUrl} alt="attachment" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.fileUrl, 'image')} />
                                             ) : isVideoUrl(msg.fileUrl) ? (
-                                              <video controls className="message-video" style={{ maxWidth: '300px', borderRadius: '8px' }}><source src={msg.fileUrl} /></video>
+                                              <div className="message-video-preview" style={{ position: 'relative', maxWidth: '300px', borderRadius: '8px', cursor: 'pointer', overflow: 'hidden' }} onClick={() => openMediaModal(msg.fileUrl, 'video')}>
+                                                <video src={msg.fileUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
+                                                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.24)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                  <span style={{ fontSize: 26, color: '#fff', fontWeight: 700 }}>▶</span>
+                                                </div>
+                                              </div>
                                             ) : (
                                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                <span className="message-file">📎 {basenameFromUrl(msg.fileUrl)}</span>
-                                                <button onClick={() => downloadFile(msg.fileUrl, basenameFromUrl(msg.fileUrl))} title="Tải về" style={{ background: 'none', border: 'none', color: '#60a5fa', fontSize: 18, lineHeight: 1, cursor: 'pointer', padding: 0 }}>⬇</button>
+                                                <span className="message-file">{basenameFromUrl(msg.fileUrl)}</span>
+                                                <button onClick={() => downloadFile(msg.fileUrl, basenameFromUrl(msg.fileUrl))} title="Tải về" style={{ background: '#eef2ff', border: '1px solid #bfdbfe', color: '#1d4ed8', borderRadius: 6, fontSize: 13, fontWeight: 600, padding: '4px 8px', cursor: 'pointer' }}>⬇ Tải về</button>
                                               </div>
                                             )}
                                             {msg.content && <div style={{ marginTop: 4 }}>{msg.content}</div>}
                                           </>
                                         ) : isGifUrl(msg.content) ? (
-                                          <img src={msg.content} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.content, '_blank')} />
+                                          <img src={msg.content} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.content, 'image')} />
                                         ) : isImageUrl(msg.content) ? (
-                                          <img src={msg.content} alt="image" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => window.open(msg.content, '_blank')} />
+                                          <img src={msg.content} alt="image" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.content, 'image')} />
                                         ) : isVideoUrl(msg.content) ? (
-                                          <video controls className="message-video" style={{ maxWidth: '300px', borderRadius: '8px' }}><source src={msg.content} /></video>
+                                          <div className="message-video-preview" style={{ position: 'relative', maxWidth: '300px', borderRadius: '8px', cursor: 'pointer', overflow: 'hidden' }} onClick={() => openMediaModal(msg.content, 'video')}>
+                                            <video src={msg.content} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
+                                            <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.24)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                              <span style={{ fontSize: 26, color: '#fff', fontWeight: 700 }}>▶</span>
+                                            </div>
+                                          </div>
                                         ) : isDocumentUrl(msg.content) ? (
                                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                            <span className="message-file">📎 {basenameFromUrl(msg.content)}</span>
-                                            <button onClick={() => downloadFile(msg.content, basenameFromUrl(msg.content))} title="Tải về" style={{ background: 'none', border: 'none', color: '#60a5fa', fontSize: 18, lineHeight: 1, cursor: 'pointer', padding: 0 }}>⬇</button>
+                                            <span className="message-file">{basenameFromUrl(msg.content)}</span>
+                                            <button onClick={() => downloadFile(msg.content, basenameFromUrl(msg.content))} title="Tải về" style={{ background: '#eef2ff', border: '1px solid #bfdbfe', color: '#1d4ed8', borderRadius: 6, fontSize: 13, fontWeight: 600, padding: '4px 8px', cursor: 'pointer' }}>⬇ Tải về</button>
                                           </div>
                                         ) : (
                                           <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</span>
@@ -1629,29 +1730,45 @@ const Home = () => {
                             </div>
                           )
                         })
-                        
+
                         return result
                       })()
                     )}
                     <div ref={messagesEndRef} />
                   </div>
+
+                  {showMediaModal && mediaModalUrl && (
+                    <div onClick={closeMediaModal} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999, flexDirection: 'column', gap: 16 }}>
+                      <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '80vh' }} onClick={e => e.stopPropagation()}>
+                        {mediaModalType === 'video' ? (
+                          <video src={mediaModalUrl} controls autoPlay style={{ maxWidth: '90vw', maxHeight: '80vh', borderRadius: 8, display: 'block' }} />
+                        ) : (
+                          <img src={mediaModalUrl} alt={mediaModalName || 'media'} style={{ maxWidth: '90vw', maxHeight: '80vh', objectFit: 'contain', borderRadius: 8, display: 'block' }} />
+                        )}
+                        <button onClick={closeMediaModal} title="Đóng" style={{ position: 'absolute', top: -12, right: -12, background: 'rgba(0,0,0,0.6)', border: 'none', color: '#fff', borderRadius: '50%', width: 32, height: 32, fontSize: 18, cursor: 'pointer' }}>✕</button>
+                      </div>
+                      <button onClick={() => downloadFile(mediaModalUrl, mediaModalName || 'download')} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#1d4ed8', color: '#fff', padding: '8px 20px', borderRadius: 8, border: 'none', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>⬇ Tải về</button>
+                    </div>
+                  )}
+
                   <div className="chat-input">
                     {pendingFile && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, padding: '4px 8px', background: '#f1f5f9', borderRadius: 8, width: '100%' }}>
-                        <span style={{ fontSize: 13, color: '#334155' }}>📎 {pendingFile.name}</span>
-                        <button 
-                          onClick={() => { 
+                      <div className="chat-file-preview">
+                        <span className="chat-file-preview-name">{pendingFile.name}</span>
+                        <button
+                          onClick={() => {
                             setPendingFile(null)
                             if (fileInputRef2.current) fileInputRef2.current.value = ''
-                          }} 
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 16, lineHeight: 1, marginLeft: 'auto' }}
+                            if (videoInputRef.current) videoInputRef.current.value = ''
+                          }}
+                          className="chat-file-preview-remove"
                         >
                           ✕
                         </button>
                       </div>
                     )}
-                    <button 
-                      className="icon-btn emoji-btn" 
+                    <button
+                      className="icon-btn emoji-btn"
                       title="Emoji"
                       onClick={() => setShowEmojiPicker(!showEmojiPicker)}
                     >
@@ -1659,7 +1776,7 @@ const Home = () => {
                     </button>
                     {showEmojiPicker && (
                       <div className="emoji-picker-container" ref={emojiPickerRef}>
-                        <EmojiPicker 
+                        <EmojiPicker
                           onEmojiClick={(emojiData) => {
                             const emoji = emojiData?.emoji || emojiData
                             setNewMessage(prev => prev + (emoji || ''))
@@ -1683,8 +1800,7 @@ const Home = () => {
                     <input
                       value={newMessage}
                       onChange={e => setNewMessage(e.target.value)}
-                      placeholder={isGroupMessagingBlocked(selectedContact) ? 'Bạn không phải thành viên nhóm' : 'Nhập tin nhắn...'}
-                      disabled={isGroupMessagingBlocked(selectedContact)}
+                      placeholder="Nhập tin nhắn..."
                       onKeyDown={async e => {
                         if (e.key === 'Enter' && !e.shiftKey) {
                           e.preventDefault()
@@ -1693,9 +1809,7 @@ const Home = () => {
                         }
                       }}
                     />
-                    <button onClick={handleSendMessage} disabled={isGroupMessagingBlocked(selectedContact)}>
-                      Gửi
-                    </button>
+                    <button onClick={handleSendMessage}>Gửi</button>
                   </div>
                 </div>
                 {showInfoPanel && selectedContact && (
@@ -1784,9 +1898,13 @@ const Home = () => {
                             {(selectedContact.participantName || selectedContact.name || 'U').charAt(0).toUpperCase()}
                           </div>
                           <h3>{selectedContact.participantName || selectedContact.name}</h3>
-                          {selectedContact.lastMessageAt && (
-                            <p className="info-status">{formatRelative(selectedContact.lastMessageAt)}</p>
-                          )}
+                          {(() => {
+                            const contactId = selectedContact.participantId || selectedContact._id
+                            const text = getUserStatusText(contactId)
+                            return text ? (
+                              <p className="info-status">{text}</p>
+                            ) : null
+                          })()}
                           <button className="btn-block" onClick={toggleBlock}>
                             {blockedUsers.includes(selectedContact.participantId) ? 'Bỏ chặn' : 'Chặn'}
                           </button>
@@ -1916,7 +2034,7 @@ const Home = () => {
                       </div>
                       <div className="fl-toolbar">
                         <div className="fl-search-box">
-                          <svg className="fl-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                          <svg className="fl-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
                           <input
                             type="text"
                             placeholder="Tìm nhóm"
@@ -1983,7 +2101,7 @@ const Home = () => {
                 </div>
                 <div className="fl-toolbar">
                   <div className="fl-search-box">
-                    <svg className="fl-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <svg className="fl-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
                     <input
                       type="text"
                       placeholder="Tìm bạn"
@@ -2098,9 +2216,9 @@ const Home = () => {
                   <h3>Bảo mật</h3>
                   <div className="settings-item">
                     <button className="btn-danger" onClick={() => {
-                    setError('')
-                    setShowChangePassword(true)
-                  }}>Đổi mật khẩu</button>
+                      setError('')
+                      setShowChangePassword(true)
+                    }}>Đổi mật khẩu</button>
                   </div>
                 </div>
 
@@ -2125,335 +2243,363 @@ const Home = () => {
   return (
     <>
       <div className="home-container">
-      <div className="sidebar">
-        <div
-          className="avatar user-avatar"
-          onClick={openProfile}
-          title="Hồ sơ người dùng"
-        >
-          {user?.avatarUrl ? (
-            <img src={user.avatarUrl} alt="avatar" />
-          ) : (
-            (user?.name ? user.name.charAt(0).toUpperCase() : 'U')
-          )}
-        </div>
-
-        <div
-          className={`icon ${currentView === 'chat' ? 'active' : ''}`}
-          onClick={() => handleViewChange('chat')}
-          title="Tin nhắn"
-        >
-          <MdChat />
-        </div>
-
-        <div
-          className={`icon ${currentView === 'friends' ? 'active' : ''}`}
-          onClick={() => handleViewChange('friends')}
-          title="Danh bạ"
-        >
-          <MdContacts />
-          {friendRequests.length > 0 && (
-            <span className="sidebar-badge">{friendRequests.length > 99 ? '99+' : friendRequests.length}</span>
-          )}
-        </div>
-
-        <div
-          className={`icon ${currentView === 'ai' ? 'active' : ''}`}
-          onClick={() => handleViewChange('ai')}
-          title="Trợ lý AI"
-        >
-          <MdSmartToy />
-        </div>
-
-        <div
-          className={`icon settings-icon ${currentView === 'settings' ? 'active' : ''}`}
-          onClick={() => handleViewChange('settings')}
-          title="Cài đặt"
-        >
-          <MdSettings />
-        </div>
-      </div>
-
-      {(currentView === 'friends' || currentView === 'chat') && (
-        <div className="contacts-panel">
-          {currentView === 'chat' || currentView === 'friends' ? (
-          <>
-            <div className="contacts-header">
-              <div className="search-wrapper">
-                <MdEdit className="search-icon" />
-                <input
-                  className="search"
-                  placeholder="Tìm tên/ email"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-              <div className="contacts-icon-group">
-                <div className="icon" title="Thêm bạn" onClick={() => setShowAddFriendModal(true)}>
-                  <MdPersonAdd />
-                </div>
-                <div className="icon" title="Tạo nhóm chat" onClick={() => setShowCreateGroupModal(true)}>
-                  <MdPeople />
-                </div>
-                <div className="icon" title="Tham gia nhóm bằng mã" onClick={() => { setShowJoinGroupModal(true); setJoinGroupCode('') }}>
-                  <MdLink />
-                </div>
-              </div>
-            </div>
-
-            {error && <div className="error-message">{error}</div>}
-
-            {currentView === 'friends' ? (
-              <nav className="friends-nav">
-                <div
-                  className={`friends-nav-item ${friendsView === 'friends-list' ? 'active' : ''}`}
-                  onClick={() => setFriendsView('friends-list')}
-                >
-                  <MdContacts className="friends-nav-icon" />
-                  <span>Danh sách bạn bè</span>
-                </div>
-                <div
-                  className={`friends-nav-item ${friendsView === 'group-list' ? 'active' : ''}`}
-                  onClick={() => setFriendsView('group-list')}
-                >
-                  <MdGroup className="friends-nav-icon" />
-                  <span>Danh sách nhóm</span>
-                </div>
-                <div
-                  className={`friends-nav-item ${friendsView === 'friend-requests' ? 'active' : ''}`}
-                  onClick={() => { setFriendsView('friend-requests'); loadFriendRequests() }}
-                >
-                  <MdPersonAdd className="friends-nav-icon" />
-                  <span>Lời mời kết bạn</span>
-                  {friendRequests.length > 0 && (
-                    <span className="friends-nav-badge">{friendRequests.length}</span>
-                  )}
-                </div>
-                <div
-                  className={`friends-nav-item ${friendsView === 'group-invites' ? 'active' : ''}`}
-                  onClick={() => setFriendsView('group-invites')}
-                >
-                  <MdEmail className="friends-nav-icon" />
-                  <span>Lời mời vào nhóm và cộng đồng</span>
-                </div>
-              </nav>
-            ) : loading ? (
-              <div className="loading-state">
-                <p>Đang tải...</p>
-              </div>
-            ) : filteredContacts.length === 0 ? (
-              <div className="empty-contacts">
-                <p>Không tìm thấy liên hệ nào</p>
-              </div>
+        <div className="sidebar">
+          <div
+            className="avatar user-avatar"
+            onClick={openProfile}
+            title="Hồ sơ người dùng"
+          >
+            {user?.avatarUrl ? (
+              <img src={user.avatarUrl} alt="avatar" />
             ) : (
-              filteredContacts
-                // bỏ qua các item không có tên hiển thị để tránh dòng trống
-                .filter(contact => (contact.name || contact.participantName || contact.groupId?.name || contact.email))
-                .map(contact => {
-                  const displayName = contact.name || contact.participantName || contact.groupId?.name || contact.email || ''
-                  const avatarUrl = contact.participantAvatar || contact.avatarUrl
-                  const userId = contact.participantId || contact._id
-                  const isGroup = contact.type === 'GROUP'
-                  const userStatus = !isGroup && userId ? onlineStatus[String(userId)] : null
-                  const isOnline = userStatus?.status === 'online'
-                  
-                  return (
-                    <div
-                      key={contact._id || contact.participantId}
-                      className={`contact-item ${selectedContact?._id === contact._id ? 'active' : ''}`}
-                      onClick={() => handleContactClick(contact)}
-                    >
-                      <div 
-                        className="avatar-wrapper"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          if (!isGroup && userId) {
-                            openUserPopup(userId)
-                          }
-                        }}
-                        style={{ cursor: !isGroup && userId ? 'pointer' : 'default' }}
-                      >
-                        <div className="avatar">
-                          {avatarUrl ? (
-                            <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
-                          ) : (
-                            displayName.charAt(0).toUpperCase()
-                          )}
-                        </div>
-                        {!isGroup && userId && (
-                          <span className={`status-indicator ${isOnline ? 'online' : 'offline'}`}></span>
-                        )}
-                      </div>
-                      <div className="contact-info">
-                        <span className="name">
-                          {displayName}
-                        </span>
-                        <span className="last-message">
-                          {contact.lastMessage?.content || 'Không có tin nhắn'}
-                        </span>
-                      </div>
-                    </div>
-                  )
-                })
+              (user?.name ? user.name.charAt(0).toUpperCase() : 'U')
             )}
-          </>
-        ) : (
-          <div className="contacts-panel-empty">
-            <p>Chọn một option từ thanh bên để bắt đầu</p>
+          </div>
+
+          <div
+            className={`icon ${currentView === 'chat' ? 'active' : ''}`}
+            onClick={() => handleViewChange('chat')}
+            title="Tin nhắn"
+          >
+            <MdChat />
+          </div>
+
+          <div
+            className={`icon ${currentView === 'friends' ? 'active' : ''}`}
+            onClick={() => handleViewChange('friends')}
+            title="Danh bạ"
+          >
+            <MdContacts />
+            {friendRequests.length > 0 && (
+              <span className="sidebar-badge">{friendRequests.length > 99 ? '99+' : friendRequests.length}</span>
+            )}
+          </div>
+
+          <div
+            className={`icon ${currentView === 'ai' ? 'active' : ''}`}
+            onClick={() => handleViewChange('ai')}
+            title="Trợ lý AI"
+          >
+            <MdSmartToy />
+          </div>
+
+          <div
+            className={`icon settings-icon ${currentView === 'settings' ? 'active' : ''}`}
+            onClick={() => handleViewChange('settings')}
+            title="Cài đặt"
+          >
+            <MdSettings />
+          </div>
+        </div>
+
+        {(currentView === 'friends' || currentView === 'chat') && (
+          <div className="contacts-panel">
+            {currentView === 'chat' || currentView === 'friends' ? (
+              <>
+                <div className="contacts-header">
+                  <div className="search-wrapper">
+                    <MdEdit className="search-icon" />
+                    <input
+                      className="search"
+                      placeholder="Tìm tên/ email"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                  </div>
+                  <div className="contacts-icon-group">
+                    <div className="icon" title="Thêm bạn" onClick={() => setShowAddFriendModal(true)}>
+                      <MdPersonAdd />
+                    </div>
+                    <div className="icon" title="Tạo nhóm chat" onClick={() => setShowCreateGroupModal(true)}>
+                      <MdPeople />
+                    </div>
+                    <div className="icon" title="Tham gia nhóm bằng mã" onClick={() => { setShowJoinGroupModal(true); setJoinGroupCode('') }}>
+                      <MdLink />
+                    </div>
+                  </div>
+                </div>
+
+                {error && <div className="error-message">{error}</div>}
+
+                {currentView === 'friends' ? (
+                  <nav className="friends-nav">
+                    <div
+                      className={`friends-nav-item ${friendsView === 'friends-list' ? 'active' : ''}`}
+                      onClick={() => setFriendsView('friends-list')}
+                    >
+                      <MdContacts className="friends-nav-icon" />
+                      <span>Danh sách bạn bè</span>
+                    </div>
+                    <div
+                      className={`friends-nav-item ${friendsView === 'group-list' ? 'active' : ''}`}
+                      onClick={() => setFriendsView('group-list')}
+                    >
+                      <MdGroup className="friends-nav-icon" />
+                      <span>Danh sách nhóm</span>
+                    </div>
+                    <div
+                      className={`friends-nav-item ${friendsView === 'friend-requests' ? 'active' : ''}`}
+                      onClick={() => { setFriendsView('friend-requests'); loadFriendRequests() }}
+                    >
+                      <MdPersonAdd className="friends-nav-icon" />
+                      <span>Lời mời kết bạn</span>
+                      {friendRequests.length > 0 && (
+                        <span className="friends-nav-badge">{friendRequests.length}</span>
+                      )}
+                    </div>
+                    <div
+                      className={`friends-nav-item ${friendsView === 'group-invites' ? 'active' : ''}`}
+                      onClick={() => setFriendsView('group-invites')}
+                    >
+                      <MdEmail className="friends-nav-icon" />
+                      <span>Lời mời vào nhóm và cộng đồng</span>
+                    </div>
+                  </nav>
+                ) : loading ? (
+                  <div className="loading-state">
+                    <p>Đang tải...</p>
+                  </div>
+                ) : filteredContacts.length === 0 ? (
+                  <div className="empty-contacts">
+                    <p>Không tìm thấy liên hệ nào</p>
+                  </div>
+                ) : (
+                  filteredContacts
+                    // bỏ qua các item không có tên hiển thị để tránh dòng trống
+                    .filter(contact => (contact.name || contact.participantName || contact.groupId?.name || contact.email))
+                    .map(contact => {
+                      const displayName = contact.name || contact.participantName || contact.groupId?.name || contact.email || ''
+                      const avatarUrl = contact.participantAvatar || contact.avatarUrl
+                      const userId = contact.participantId || contact._id
+                      const isGroup = contact.type === 'GROUP'
+                      const userStatus = !isGroup && userId ? onlineStatus[String(userId)] : null
+                      const isOnline = userStatus?.status === 'online'
+                      const isConversation = !!contact.type || !!contact.participantId
+                      const lastTime = isConversation
+                        ? (contact.lastMessageAt || contact.lastMessage?.createdAt)
+                        : null
+                      const lastTimeText = lastTime ? formatRelative(lastTime) : ''
+                      const unread = isConversation && contact.unreadCounts && user?._id
+                        ? (contact.unreadCounts[String(user._id)] || 0)
+                        : 0
+                      const unreadText = unread > 99 ? '99+' : String(unread)
+
+                      return (
+                        <div
+                          key={contact._id || contact.participantId}
+                          className={`contact-item ${selectedContact?._id === contact._id ? 'active' : ''}`}
+                          onClick={() => handleContactClick(contact)}
+                        >
+                          <div
+                            className="avatar-wrapper"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (!isGroup && userId) {
+                                openUserPopup(userId)
+                              }
+                            }}
+                            style={{ cursor: !isGroup && userId ? 'pointer' : 'default' }}
+                          >
+                            <div className="avatar">
+                              {avatarUrl ? (
+                                <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+                              ) : (
+                                displayName.charAt(0).toUpperCase()
+                              )}
+                            </div>
+                            {!isGroup && userId && (
+                              <span className={`status-indicator ${isOnline ? 'online' : 'offline'}`}></span>
+                            )}
+                          </div>
+                          <div className="contact-info">
+                            <div className="contact-title-row">
+                              <span className="name">
+                                {displayName}
+                              </span>
+                              {(lastTimeText || unread > 0) && (
+                                <div className="contact-meta-right">
+                                  {lastTimeText && (
+                                    <span className="contact-time">
+                                      {lastTimeText}
+                                    </span>
+                                  )}
+                                  {unread > 0 && (
+                                    <span className="unread-badge">
+                                      {unreadText}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <span className="last-message">
+                              {contact.lastMessage?.isRecalled
+                                ? 'Tin nhắn đã được thu hồi'
+                                : (contact.lastMessage?.content ||
+                                  (!isConversation ? (contact.email || '') : 'Không có tin nhắn'))}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })
+                )}
+              </>
+            ) : (
+              <div className="contacts-panel-empty">
+                <p>Chọn một option từ thanh bên để bắt đầu</p>
+              </div>
+            )}
           </div>
         )}
-        </div>
-      )}
 
-      {renderMainArea()}
+        {renderMainArea()}
 
-      {/* User Profile Modal */}
-      {showUserProfile && (
-        <div className="profile-modal" onClick={() => setShowUserProfile(false)}>
-          <div className="profile-content" onClick={(e) => e.stopPropagation()}>
-            <div className="profile-header">
-              <h3>Hồ sơ người dùng</h3>
-              <button
-                className="close-btn"
-                onClick={() => setShowUserProfile(false)}
-              >
-                <MdClose />
-              </button>
-            </div>
-            {error && <div className="error-message" style={{padding:'0 20px',color:'red',fontSize:'13px'}}>{error}</div>}
-
-            <div
-              className="profile-banner"
-              onClick={handleBannerClick}
-              title="Click để đổi banner"
-            >
-              {user?.bannerUrl ? (
-                <img src={user.bannerUrl} alt="banner" />
-              ) : (
-                <span>Banner</span>
-              )}
-            </div>
-            <input
-              type="file"
-              accept="image/*"
-              ref={bannerInputRef}
-              style={{ display: 'none' }}
-              onChange={handleBannerUpload}
-            />
-
-            <div className="profile-body">
-              <div className="profile-avatar-wrapper">
-                <div
-                  className="profile-avatar-large"
-                  onClick={handleAvatarClick}
-                  title="Click để đổi avatar"
+        {/* User Profile Modal */}
+        {showUserProfile && (
+          <div className="profile-modal" onClick={() => setShowUserProfile(false)}>
+            <div className="profile-content" onClick={(e) => e.stopPropagation()}>
+              <div className="profile-header">
+                <h3>Hồ sơ người dùng</h3>
+                <button
+                  className="close-btn"
+                  onClick={() => setShowUserProfile(false)}
                 >
-                  {user?.avatarUrl ? (
-                    <img src={user.avatarUrl} alt="avatar" />
-                  ) : (
-                    (user?.name || 'U').charAt(0).toUpperCase()
-                  )}
-                </div>
+                  <MdClose />
+                </button>
+              </div>
+              {error && <div className="error-message" style={{ padding: '0 20px', color: 'red', fontSize: '13px' }}>{error}</div>}
+
+              <div
+                className="profile-banner"
+                onClick={handleBannerClick}
+                title="Click để đổi banner"
+              >
+                {user?.bannerUrl ? (
+                  <img src={user.bannerUrl} alt="banner" />
+                ) : (
+                  <span>Banner</span>
+                )}
               </div>
               <input
                 type="file"
                 accept="image/*"
-                ref={avatarInputRef}
+                ref={bannerInputRef}
                 style={{ display: 'none' }}
-                onChange={handleAvatarUpload}
+                onChange={handleBannerUpload}
               />
 
-              <div className="profile-info">
+              <div className="profile-body">
+                <div className="profile-avatar-wrapper">
+                  <div
+                    className="profile-avatar-large"
+                    onClick={handleAvatarClick}
+                    title="Click để đổi avatar"
+                  >
+                    {user?.avatarUrl ? (
+                      <img src={user.avatarUrl} alt="avatar" />
+                    ) : (
+                      (user?.name || 'U').charAt(0).toUpperCase()
+                    )}
+                  </div>
+                </div>
+                <input
+                  type="file"
+                  accept="image/*"
+                  ref={avatarInputRef}
+                  style={{ display: 'none' }}
+                  onChange={handleAvatarUpload}
+                />
+
+                <div className="profile-info">
+                  {isEditingProfile ? (
+                    <>
+                      <div className="form-group">
+                        <label>Họ tên</label>
+                        <input
+                          name="name"
+                          value={profileForm.name}
+                          onChange={handleProfileChange}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Ngày sinh</label>
+                        <input
+                          type="date"
+                          name="dateOfBirth"
+                          value={profileForm.dateOfBirth}
+                          onChange={handleProfileChange}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Giới tính</label>
+                        <input
+                          name="gender"
+                          value={profileForm.gender}
+                          onChange={handleProfileChange}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>BIO</label>
+                        <textarea
+                          name="bio"
+                          value={profileForm.bio}
+                          onChange={handleProfileChange}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {/* ID được ẩn theo yêu cầu */}
+                      <p>
+                        <strong>Tên:</strong> {user?.name || 'Không có tên'}
+                      </p>
+                      <p>
+                        <strong>Email:</strong> {user?.email || 'Không có email'}
+                      </p>
+                      <p>
+                        <strong>Ngày sinh:</strong> {formatDate(user?.dateOfBirth) || 'dd/mm/yyyy'}
+                      </p>
+                      <p>
+                        <strong>Giới tính:</strong> {user?.gender || 'Không có'}
+                      </p>
+                      <p>
+                        <strong>BIO:</strong> {user?.bio || ''}
+                      </p>
+                    </>
+                  )}
+                  {!isEditingProfile && (
+                    <button className="btn-edit" onClick={startEditProfile}>
+                      <MdEdit />
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="profile-footer">
                 {isEditingProfile ? (
                   <>
-                    <div className="form-group">
-                      <label>Họ tên</label>
-                      <input
-                        name="name"
-                        value={profileForm.name}
-                        onChange={handleProfileChange}
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label>Ngày sinh</label>
-                      <input
-                        type="date"
-                        name="dateOfBirth"
-                        value={profileForm.dateOfBirth}
-                        onChange={handleProfileChange}
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label>Giới tính</label>
-                      <input
-                        name="gender"
-                        value={profileForm.gender}
-                        onChange={handleProfileChange}
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label>BIO</label>
-                      <textarea
-                        name="bio"
-                        value={profileForm.bio}
-                        onChange={handleProfileChange}
-                      />
-                    </div>
+                    <button className="btn" onClick={saveProfile}>
+                      Cập nhật
+                    </button>
+                    <button
+                      className="btn btn-cancel"
+                      onClick={() => setIsEditingProfile(false)}
+                    >
+                      Quay lại
+                    </button>
                   </>
                 ) : (
                   <>
-                    {/* ID được ẩn theo yêu cầu */}
-                    <p>
-                      <strong>Tên:</strong> {user?.name || 'Không có tên'}
-                    </p>
-                    <p>
-                      <strong>Email:</strong> {user?.email || 'Không có email'}
-                    </p>
-                    <p>
-                      <strong>Ngày sinh:</strong> {formatDate(user?.dateOfBirth) || 'dd/mm/yyyy'}
-                    </p>
-                    <p>
-                      <strong>Giới tính:</strong> {user?.gender || 'Không có'}
-                    </p>
-                    <p>
-                      <strong>BIO:</strong> {user?.bio || ''}
-                    </p>
+                    <button
+                      className="btn btn-cancel"
+                      onClick={() => setShowUserProfile(false)}
+                    >
+                      Đóng
+                    </button>
                   </>
-                )}
-                {!isEditingProfile && (
-                  <button className="btn-edit" onClick={startEditProfile}>
-                    <MdEdit />
-                  </button>
                 )}
               </div>
             </div>
-            <div className="profile-footer">
-              {isEditingProfile ? (
-                <>
-                  <button className="btn" onClick={saveProfile}>
-                    Cập nhật
-                  </button>
-                  <button
-                    className="btn btn-cancel"
-                    onClick={() => setIsEditingProfile(false)}
-                  >
-                    Quay lại
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    className="btn btn-cancel"
-                    onClick={() => setShowUserProfile(false)}
-                  >
-                    Đóng
-                  </button>
-                </>
-              )}
-            </div>
           </div>
-        </div>
-      )}
+        )}
       </div>  {/* end home-container */}
 
       {/* popup when clicking on another user's avatar in chat */}
@@ -2626,7 +2772,7 @@ const Home = () => {
                 <MdClose />
               </button>
             </div>
-            {error && <div className="error-message" style={{padding:'0 20px',color:'red',fontSize:'13px'}}>{error}</div>}
+            {error && <div className="error-message" style={{ padding: '0 20px', color: 'red', fontSize: '13px' }}>{error}</div>}
             <div className="profile-body">
               <div className="form-group">
                 <label>Mật khẩu hiện tại</label>
@@ -2704,7 +2850,7 @@ const Home = () => {
                         <input
                           type="checkbox"
                           checked={selectedMembersToAdd.includes(friend._id)}
-                          onChange={() => {}}
+                          onChange={() => { }}
                           style={{ marginRight: '10px', cursor: 'pointer' }}
                         />
                         <div style={{ width: '38px', height: '38px', borderRadius: '50%', backgroundColor: '#003399', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', marginRight: '10px', flexShrink: 0, overflow: 'hidden' }}>
@@ -2915,7 +3061,7 @@ const Home = () => {
                         <input
                           type="checkbox"
                           checked={selectedFriendsForGroup.includes(friend._id)}
-                          onChange={() => {}}
+                          onChange={() => { }}
                           style={{ marginRight: '10px', cursor: 'pointer' }}
                         />
                         <div style={{
@@ -3081,7 +3227,7 @@ const Home = () => {
         </div>
       )}
 
-    
+
     </>
   )
 }
