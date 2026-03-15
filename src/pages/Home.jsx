@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MdChat, MdContacts, MdPeople, MdSmartToy, MdSettings, MdPerson, MdPersonAdd, MdLink, MdLogout, MdEdit, MdClose, MdMenu, MdBlock, MdEmojiEmotions, MdAttachFile, MdVideocam, MdSend } from 'react-icons/md'
+import { MdChat, MdContacts, MdPeople, MdSmartToy, MdSettings, MdPerson, MdPersonAdd, MdLink, MdLogout, MdEdit, MdClose, MdMenu, MdBlock, MdEmojiEmotions, MdAttachFile, MdVideocam, MdSend, MdGroup, MdEmail } from 'react-icons/md'
 import EmojiPicker from 'emoji-picker-react'
+import toast from 'react-hot-toast'
 import authService from '../services/authService'
 import conversationService from '../services/conversationService'
 import friendService from '../services/friendService'
@@ -82,6 +83,57 @@ const Home = () => {
   const [transferTargetUserId, setTransferTargetUserId] = useState('')
   const [groupActionLoading, setGroupActionLoading] = useState(false)
   const [friendsView, setFriendsView] = useState('friends-list')
+  const confirmResolverRef = useRef(null)
+  const [confirmPopup, setConfirmPopup] = useState({
+    open: false,
+    title: 'Xác nhận',
+    message: '',
+    confirmText: 'Xác nhận',
+    cancelText: 'Hủy',
+    danger: false
+  })
+
+  useEffect(() => {
+    if (error) {
+      toast.error(error, { id: 'home-error-toast' })
+    }
+  }, [error])
+
+  const openConfirmPopup = ({
+    title = 'Xác nhận',
+    message,
+    confirmText = 'Xác nhận',
+    cancelText = 'Hủy',
+    danger = false
+  }) => {
+    return new Promise((resolve) => {
+      confirmResolverRef.current = resolve
+      setConfirmPopup({
+        open: true,
+        title,
+        message: message || '',
+        confirmText,
+        cancelText,
+        danger
+      })
+    })
+  }
+
+  const closeConfirmPopup = (confirmed) => {
+    const resolver = confirmResolverRef.current
+    confirmResolverRef.current = null
+    setConfirmPopup(prev => ({ ...prev, open: false }))
+    if (resolver) resolver(Boolean(confirmed))
+  }
+
+  useEffect(() => {
+    return () => {
+      if (confirmResolverRef.current) {
+        confirmResolverRef.current(false)
+        confirmResolverRef.current = null
+      }
+    }
+  }, [])
 
   // Check authentication
   useEffect(() => {
@@ -570,7 +622,7 @@ const Home = () => {
       await authService.changePassword(passwordForm.oldPassword, passwordForm.newPassword)
       setShowChangePassword(false)
       setPasswordForm({ oldPassword: '', newPassword: '', confirmPassword: '' })
-      alert('Đổi mật khẩu thành công')
+      toast.success('Đổi mật khẩu thành công')
     } catch (err) {
       console.error(err)
       setError(err.message || 'Có lỗi khi đổi mật khẩu')
@@ -836,7 +888,13 @@ const Home = () => {
 
   const handleRemoveGroupMember = async (memberId, memberName) => {
     if (!selectedContact?._id || !memberId) return
-    if (!window.confirm(`Bạn có chắc muốn xóa ${memberName || 'thành viên này'} khỏi nhóm?`)) return
+    const confirmed = await openConfirmPopup({
+      title: 'Xóa thành viên',
+      message: `Bạn có chắc muốn xóa ${memberName || 'thành viên này'} khỏi nhóm?`,
+      confirmText: 'Xóa',
+      danger: true
+    })
+    if (!confirmed) return
     try {
       setGroupActionLoading(true)
       await conversationService.removeGroupMember(selectedContact._id, memberId)
@@ -851,7 +909,12 @@ const Home = () => {
 
   const handlePromoteMember = async (memberId, memberName) => {
     if (!selectedContact?._id || !memberId) return
-    if (!window.confirm(`Bổ nhiệm ${memberName || 'thành viên này'} làm phó nhóm?`)) return
+    const confirmed = await openConfirmPopup({
+      title: 'Bổ nhiệm phó nhóm',
+      message: `Bổ nhiệm ${memberName || 'thành viên này'} làm phó nhóm?`,
+      confirmText: 'Bổ nhiệm'
+    })
+    if (!confirmed) return
     try {
       setGroupActionLoading(true)
       await conversationService.promoteToDeputy(selectedContact._id, memberId)
@@ -866,7 +929,13 @@ const Home = () => {
 
   const handleDemoteMember = async (memberId, memberName) => {
     if (!selectedContact?._id || !memberId) return
-    if (!window.confirm(`Thu hồi quyền phó nhóm của ${memberName || 'thành viên này'}?`)) return
+    const confirmed = await openConfirmPopup({
+      title: 'Thu hồi quyền',
+      message: `Thu hồi quyền phó nhóm của ${memberName || 'thành viên này'}?`,
+      confirmText: 'Thu hồi',
+      danger: true
+    })
+    if (!confirmed) return
     try {
       setGroupActionLoading(true)
       await conversationService.revokeDeputyRole(selectedContact._id, memberId)
@@ -935,7 +1004,13 @@ const Home = () => {
 
   const handleDeleteGroup = async () => {
     if (!selectedContact) return
-    if (!window.confirm('Bạn có chắc muốn xoá nhóm? Hành động này không thể hoàn tác.')) return
+    const confirmed = await openConfirmPopup({
+      title: 'Xóa nhóm',
+      message: 'Bạn có chắc muốn xoá nhóm? Hành động này không thể hoàn tác.',
+      confirmText: 'Xóa nhóm',
+      danger: true
+    })
+    if (!confirmed) return
     try {
       await conversationService.deleteGroup(selectedContact._id)
       await loadConversations()
@@ -956,7 +1031,13 @@ const Home = () => {
       setShowTransferOwnerModal(true)
       return
     }
-    if (!window.confirm('Bạn có chắc muốn rời nhóm này?')) return
+    const confirmed = await openConfirmPopup({
+      title: 'Rời nhóm',
+      message: 'Bạn có chắc muốn rời nhóm này?',
+      confirmText: 'Rời nhóm',
+      danger: true
+    })
+    if (!confirmed) return
     try {
       await conversationService.leaveGroup(selectedContact._id)
       await loadConversations()
@@ -1240,7 +1321,7 @@ const Home = () => {
     try {
       await friendService.sendFriendRequest(userId)
       await loadFriendRequests()
-      alert('Đã gửi yêu cầu kết bạn')
+      toast.success('Đã gửi yêu cầu kết bạn')
     } catch (err) {
       setError('Không thể gửi yêu cầu kết bạn')
     }
@@ -1322,7 +1403,7 @@ const Home = () => {
       setShowAddFriendModal(false)
       setRequestMessage('Xin chào, mình muốn kết bạn với bạn!')
       setSelectedUserToAdd(null)
-      alert('Đã gửi yêu cầu kết bạn')
+      toast.success('Đã gửi yêu cầu kết bạn')
     } catch (err) {
       const msg = typeof err === 'string' ? err : (err?.message || err?.error || null)
       setError(msg || 'Không thể gửi yêu cầu kết bạn')
@@ -1341,7 +1422,13 @@ const Home = () => {
 
   // Unfriend someone
   const handleUnfriend = async (userId) => {
-    if (!window.confirm('Bạn có chắc chắn muốn hủy kết bạn?')) return
+    const confirmed = await openConfirmPopup({
+      title: 'Hủy kết bạn',
+      message: 'Bạn có chắc chắn muốn hủy kết bạn?',
+      confirmText: 'Hủy kết bạn',
+      danger: true
+    })
+    if (!confirmed) return
     try {
       await friendService.unfriend(userId)
       // Cập nhật local state ngay
@@ -1537,13 +1624,53 @@ const Home = () => {
                           }
                         }}
                       >
-                        <div className="chat-avatar">
-                          {selectedContact?.participantAvatar ? (
-                            <img src={selectedContact.participantAvatar} alt="" />
-                          ) : selectedContact?.avatarUrl ? (
-                            <img src={selectedContact.avatarUrl} alt="" />
-                          ) : (
-                            (selectedContact.participantName || selectedContact.name || 'U').charAt(0).toUpperCase()
+                        <div className={`chat-avatar ${selectedContact?.type === 'GROUP' ? 'group-chat-avatar' : ''}`}>
+                          {selectedContact?.type === 'GROUP' ? (() => {
+                            // Render composite group avatar for GROUP type
+                            const rawGroupParticipants = Array.isArray(selectedContact.participants) ? selectedContact.participants : []
+                            const normalizedGroupParticipants = rawGroupParticipants.map((p) => {
+                              const pId = p.userId?._id || p._id
+                              const pName = p.userId?.name || p.name || 'U'
+                              const pAvatar = p.userId?.avatarUrl || p.avatarUrl || ''
+                              return { _id: pId, name: pName, avatarUrl: pAvatar }
+                            }).filter(p => p._id)
+                            const groupMembersForAvatar = (() => {
+                              const others = normalizedGroupParticipants.filter(p => String(p._id) !== String(user?._id))
+                              const source = others.length > 0 ? others : normalizedGroupParticipants
+                              return source.slice(0, 4)
+                            })()
+                            const groupAvatarItems = groupMembersForAvatar.length > 0
+                              ? groupMembersForAvatar
+                              : [{ _id: selectedContact._id || selectedContact.name, name: selectedContact.name || 'G', avatarUrl: selectedContact.avatarUrl || '' }]
+                            const totalGroupMembers = normalizedGroupParticipants.length
+                            const showGroupCountBadge = totalGroupMembers > 4
+
+                            return (
+                              <div className={`group-avatar-stack count-${groupAvatarItems.length}`}>
+                                {groupAvatarItems.map((member, index) => (
+                                  <div className={`group-stack-item pos-${index + 1}`} key={member._id}>
+                                    {member.avatarUrl ? (
+                                      <img src={member.avatarUrl} alt={member.name} />
+                                    ) : (
+                                      <span>{(member.name || 'G').charAt(0).toUpperCase()}</span>
+                                    )}
+                                  </div>
+                                ))}
+                                {showGroupCountBadge && (
+                                  <span className="group-stack-count">+{totalGroupMembers - 4}</span>
+                                )}
+                              </div>
+                            )
+                          })() : (
+                            <>
+                              {selectedContact?.participantAvatar ? (
+                                <img src={selectedContact.participantAvatar} alt="" />
+                              ) : selectedContact?.avatarUrl ? (
+                                <img src={selectedContact.avatarUrl} alt="" />
+                              ) : (
+                                (selectedContact.participantName || selectedContact.name || 'U').charAt(0).toUpperCase()
+                              )}
+                            </>
                           )}
                         </div>
                         {selectedContact?.type !== 'GROUP' && selectedContact?.participantId && (() => {
@@ -1556,7 +1683,12 @@ const Home = () => {
                       </div>
                       <div className="chat-header-info">
                         <h2>{selectedContact.name || selectedContact.participantName}</h2>
-                        {selectedContact.type !== 'GROUP' && (
+                        {selectedContact.type === 'GROUP' ? (
+                          <p className="chat-status">
+                            <MdGroup />
+                            {selectedContact.participants?.length || 0} thành viên
+                          </p>
+                        ) : (
                           (() => {
                             const contactId = selectedContact.participantId || selectedContact._id
                             const text = getUserStatusText(contactId)
@@ -1844,18 +1976,46 @@ const Home = () => {
                         const canManageMembers = myRoleType === 'OWNER' || myRoleType === 'DEPUTY'
                         const canManageRoles = myRoleType === 'OWNER'
 
+                        // Render composite group avatar (Zalo style)
+                        const rawGroupParticipants = Array.isArray(selectedContact.participants) ? selectedContact.participants : []
+                        const normalizedGroupParticipants = rawGroupParticipants.map((p) => {
+                          const pId = p.userId?._id || p._id
+                          const pName = p.userId?.name || p.name || 'U'
+                          const pAvatar = p.userId?.avatarUrl || p.avatarUrl || ''
+                          return { _id: pId, name: pName, avatarUrl: pAvatar }
+                        }).filter(p => p._id)
+                        const groupMembersForavatar = (() => {
+                          const others = normalizedGroupParticipants.filter(p => String(p._id) !== String(user?._id))
+                          const source = others.length > 0 ? others : normalizedGroupParticipants
+                          return source.slice(0, 3)
+                        })()
+                        const groupAvatarItems = groupMembersForAvatar.length > 0
+                          ? groupMembersForAvatar
+                          : [{ _id: selectedContact._id || selectedContact.name, name: selectedContact.name || 'G', avatarUrl: selectedContact.avatarUrl || '' }]
+                        const totalGroupMembers = normalizedGroupParticipants.length
+                        const showGroupCountBadge = totalGroupMembers > 3
+
                         return (
                           <>
                             <div className="info-header">
                               <div className="avatar-large group-avatar-large">
-                                {selectedContact.avatarUrl ? (
-                                  <img src={selectedContact.avatarUrl} alt="" />
-                                ) : (
-                                  (selectedContact.name || 'G').charAt(0).toUpperCase()
-                                )}
+                                <div className={`group-avatar-stack count-${groupAvatarItems.length}`}>
+                                  {groupAvatarItems.map((member, index) => (
+                                    <div className={`group-stack-item pos-${index + 1}`} key={member._id} style={{ width: '100%', height: '100%', position: 'absolute' }}>
+                                      {member.avatarUrl ? (
+                                        <img src={member.avatarUrl} alt={member.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                                      ) : (
+                                        <span style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: '#ccc', fontSize: '18px', fontWeight: 'bold' }}>{(member.name || 'G').charAt(0).toUpperCase()}</span>
+                                      )}
+                                    </div>
+                                  ))}
+                                  {showGroupCountBadge && (
+                                    <span className="group-stack-count">{totalGroupMembers}</span>
+                                  )}
+                                </div>
                               </div>
                               <h3>{selectedContact.name}</h3>
-                              <p>{selectedContact.participants?.length || 0} thành viên</p>
+                              <p>{totalGroupMembers} thành viên</p>
                               <div className="group-actions">
                                 <button className="member-action-btn" onClick={handleOpenAddMembersModal} disabled={groupActionLoading}>Thêm thành viên</button>
                                 <MdLink className="action-icon" title="Mã mời nhóm" onClick={handleGetInviteLink} />
@@ -1870,6 +2030,9 @@ const Home = () => {
                                 {selectedContact.participants?.map(p => {
                                   const userId = p.userId?._id || p._id
                                   const userName = p.userId?.name || p.name || 'User'
+                                  const userAvatar = p.userId?.avatarUrl || p.avatarUrl || ''
+                                  const fullName = `${userName}${String(userId) === String(user?._id) ? ' (Bạn)' : ''}`
+                                  const fullRole = getRoleLabel(p.role)
                                   const roleType = normalizeRoleType(p.role)
                                   const isSelf = String(userId) === String(user?._id)
                                   const canRemove = canManageMembers && !isSelf && roleType !== 'OWNER'
@@ -1878,9 +2041,18 @@ const Home = () => {
 
                                   return (
                                     <div className="member-item" key={userId}>
-                                      <div className="member-meta">
-                                        <span className="member-name">{userName}{isSelf ? ' (Bạn)' : ''}</span>
-                                        <span className="member-role">{getRoleLabel(p.role)}</span>
+                                      <div className="member-main" title={`${fullName} - ${fullRole}`}>
+                                        <div className="member-avatar">
+                                          {userAvatar ? (
+                                            <img src={userAvatar} alt={userName} />
+                                          ) : (
+                                            (userName || 'U').charAt(0).toUpperCase()
+                                          )}
+                                        </div>
+                                        <div className="member-meta">
+                                          <span className="member-name">{fullName}</span>
+                                          <span className="member-role">{fullRole}</span>
+                                        </div>
                                       </div>
                                       <div className="member-actions-inline">
                                         {canPromote && (
@@ -2395,6 +2567,29 @@ const Home = () => {
                       const avatarUrl = contact.participantAvatar || contact.avatarUrl
                       const userId = contact.participantId || contact._id
                       const isGroup = contact.type === 'GROUP'
+                      const rawParticipants = Array.isArray(contact.participants) ? contact.participants : []
+                      const normalizedParticipants = rawParticipants.map((p) => {
+                        const pId = p.userId?._id || p._id
+                        const pName = p.userId?.name || p.name || 'U'
+                        const pAvatar = p.userId?.avatarUrl || p.avatarUrl || ''
+                        return {
+                          _id: pId,
+                          name: pName,
+                          avatarUrl: pAvatar
+                        }
+                      }).filter(p => p._id)
+                      const groupMembersForAvatar = isGroup
+                        ? (() => {
+                          const others = normalizedParticipants.filter(p => String(p._id) !== String(user?._id))
+                          const source = others.length > 0 ? others : normalizedParticipants
+                          return source.slice(0, 3)
+                        })()
+                        : []
+                      const groupAvatarItems = groupMembersForAvatar.length > 0
+                        ? groupMembersForAvatar
+                        : [{ _id: contact._id || displayName, name: displayName || 'G', avatarUrl: contact.avatarUrl || '' }]
+                      const groupMemberCount = normalizedParticipants.length || groupAvatarItems.length
+                      const showGroupCountBadge = isGroup && groupMemberCount > 3
                       const userStatus = !isGroup && userId ? onlineStatus[String(userId)] : null
                       const isOnline = userStatus?.status === 'online'
                       const isConversation = !!contact.type || !!contact.participantId
@@ -2423,8 +2618,23 @@ const Home = () => {
                             }}
                             style={{ cursor: !isGroup && userId ? 'pointer' : 'default' }}
                           >
-                            <div className="avatar">
-                              {avatarUrl ? (
+                            <div className={`avatar ${isGroup ? 'avatar-group-stack' : ''}`}>
+                              {isGroup ? (
+                                <div className={`group-avatar-stack count-${groupAvatarItems.length}`}>
+                                  {groupAvatarItems.map((member, index) => (
+                                    <div className={`group-stack-item pos-${index + 1}`} key={member._id}>
+                                      {member.avatarUrl ? (
+                                        <img src={member.avatarUrl} alt={member.name} />
+                                      ) : (
+                                        <span>{(member.name || 'G').charAt(0).toUpperCase()}</span>
+                                      )}
+                                    </div>
+                                  ))}
+                                  {showGroupCountBadge && (
+                                    <span className="group-stack-count">{groupMemberCount}</span>
+                                  )}
+                                </div>
+                              ) : avatarUrl ? (
                                 <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
                               ) : (
                                 displayName.charAt(0).toUpperCase()
@@ -2475,6 +2685,31 @@ const Home = () => {
         )}
 
         {renderMainArea()}
+
+        {confirmPopup.open && (
+          <div className="profile-modal" onClick={() => closeConfirmPopup(false)}>
+            <div className="confirm-popup" onClick={(e) => e.stopPropagation()}>
+              <h3>{confirmPopup.title}</h3>
+              <p>{confirmPopup.message}</p>
+              <div className="confirm-popup-actions">
+                <button
+                  type="button"
+                  className="confirm-btn-secondary"
+                  onClick={() => closeConfirmPopup(false)}
+                >
+                  {confirmPopup.cancelText}
+                </button>
+                <button
+                  type="button"
+                  className={`confirm-btn-primary ${confirmPopup.danger ? 'danger' : ''}`}
+                  onClick={() => closeConfirmPopup(true)}
+                >
+                  {confirmPopup.confirmText}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* User Profile Modal */}
         {showUserProfile && (
@@ -2962,12 +3197,12 @@ const Home = () => {
       {/* Rename Group Modal */}
       {showRenameModal && (
         <div className="profile-modal" onClick={() => setShowRenameModal(false)}>
-          <div className="profile-popup" style={{ maxWidth: '400px' }} onClick={e => e.stopPropagation()}>
+          <div className="profile-popup" style={{ maxWidth: '520px', width: '95vw' }} onClick={e => e.stopPropagation()}>
             <div className="profile-header">
               <h2>Đổi tên nhóm</h2>
               <MdClose className="close-icon" onClick={() => setShowRenameModal(false)} />
             </div>
-            <div className="profile-content" style={{ padding: '20px' }}>
+            <div className="profile-content" style={{ padding: '24px', width: '100%', maxWidth: 'none', boxSizing: 'border-box', borderRadius: 0, boxShadow: 'none' }}>
               <div style={{ marginBottom: '20px' }}>
                 <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Tên nhóm mới</label>
                 <input
