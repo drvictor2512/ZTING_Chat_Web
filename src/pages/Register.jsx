@@ -1,5 +1,6 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
+import toast from 'react-hot-toast'
 import authService from '../services/authService'
 import '../styles/auth.css'
 
@@ -19,6 +20,12 @@ const Register = () => {
     otp: ''
   })
 
+  useEffect(() => {
+    if (error) {
+      toast.error(error, { id: 'register-error-toast' })
+    }
+  }, [error])
+
   const handleChange = (e) => {
     const { name, value } = e.target
     setFormData(prev => ({
@@ -33,7 +40,7 @@ const Register = () => {
     try {
       await authService.sendOTP(formData.email)
       setError('')
-      alert('Mã OTP đã được gửi lại đến email của bạn')
+      toast.success('Mã OTP đã được gửi lại đến email của bạn')
     } catch (err) {
       setError('Không thể gửi lại OTP. Vui lòng thử lại.')
     } finally {
@@ -95,6 +102,7 @@ const Register = () => {
           // Send OTP to email after successful registration
           await authService.sendOTP(formData.email)
           setStep(2)
+          toast.success('Đăng ký thành công, mã OTP đã được gửi tới email của bạn')
         } else {
           setError(response.message || 'Đăng ký thất bại')
         }
@@ -107,6 +115,7 @@ const Register = () => {
         }
         const verifyRes = await authService.verifyOTP(formData.email, formData.otp)
         if (verifyRes.message) {
+          toast.success('Xác thực OTP thành công')
           navigate('/login')
         } else {
           setError(verifyRes.message || 'Xác thực thất bại')

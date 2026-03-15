@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { Toaster } from 'react-hot-toast'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import ForgotPassword from './pages/ForgotPassword'
@@ -22,6 +23,27 @@ const App = () => {
 
   return (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          duration: 3000,
+          style: {
+            background: '#161616',
+            color: '#fff',
+            border: '1px solid rgba(255,255,255,0.08)'
+          },
+          success: {
+            style: {
+              border: '1px solid rgba(34, 197, 94, 0.35)'
+            }
+          },
+          error: {
+            style: {
+              border: '1px solid rgba(239, 68, 68, 0.35)'
+            }
+          }
+        }}
+      />
       <Routes>
         {/* Nếu đã đăng nhập, vào thẳng /home; nếu chưa thì vào /login */}
         <Route
