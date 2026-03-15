@@ -11,7 +11,7 @@ const App = () => {
   const isAuthenticated = authService.isAuthenticated()
 
   return (
-    <Router>
+    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
         {/* Nếu đã đăng nhập, vào thẳng /home; nếu chưa thì vào /login */}
         <Route

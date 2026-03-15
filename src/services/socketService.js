@@ -16,7 +16,7 @@ const socketService = {
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       reconnectionAttempts: 5,
-      transports: ['websocket', 'polling']
+      transports: ['polling', 'websocket']
     })
 
     socket.on('connect', () => {
@@ -85,6 +85,35 @@ const socketService = {
       socket.on('user_status', callback)
     }
   },
+
+  // ── Friend real-time events ──────────────────────────────────────────────
+
+  // Khi có người gửi lời mời kết bạn đến mình
+  onFriendRequestReceived: (callback) => {
+    if (socket) socket.on('friend_request_received', callback)
+  },
+
+  // Khi yêu cầu kết bạn mình gửi đi được chấp nhận
+  onFriendRequestAccepted: (callback) => {
+    if (socket) socket.on('friend_request_accepted', callback)
+  },
+
+  // Khi yêu cầu kết bạn mình gửi đi bị từ chối
+  onFriendRequestDeclined: (callback) => {
+    if (socket) socket.on('friend_request_declined', callback)
+  },
+
+  // Khi người kia thu hồi lời mời kết bạn họ đã gửi cho mình
+  onFriendRequestCancelled: (callback) => {
+    if (socket) socket.on('friend_request_cancelled', callback)
+  },
+
+  // Khi bị hủy kết bạn bởi người kia
+  onFriendRemoved: (callback) => {
+    if (socket) socket.on('friend_removed', callback)
+  },
+
+  // ────────────────────────────────────────────────────────────────────────
 
   // Unsubscribe from event
   off: (event, callback) => {
