@@ -1626,7 +1626,6 @@ const Home = () => {
                       >
                         <div className={`chat-avatar ${selectedContact?.type === 'GROUP' ? 'group-chat-avatar' : ''}`}>
                           {selectedContact?.type === 'GROUP' ? (() => {
-                            // Render composite group avatar for GROUP type
                             const rawGroupParticipants = Array.isArray(selectedContact.participants) ? selectedContact.participants : []
                             const normalizedGroupParticipants = rawGroupParticipants.map((p) => {
                               const pId = p.userId?._id || p._id
@@ -1635,18 +1634,32 @@ const Home = () => {
                               return { _id: pId, name: pName, avatarUrl: pAvatar }
                             }).filter(p => p._id)
                             const groupMembersForAvatar = (() => {
-                              const others = normalizedGroupParticipants.filter(p => String(p._id) !== String(user?._id))
-                              const source = others.length > 0 ? others : normalizedGroupParticipants
+                              const myId = String(user?._id || '')
+                              const others = normalizedGroupParticipants.filter(p => String(p._id) !== myId)
+                              const me = normalizedGroupParticipants.find(p => String(p._id) === myId)
+                              const source = [...others]
+                              if (source.length < 4 && me) {
+                                source.push(me)
+                              }
+                              if (source.length === 0) {
+                                return normalizedGroupParticipants.slice(0, 4)
+                              }
                               return source.slice(0, 4)
                             })()
-                            const groupAvatarItems = groupMembersForAvatar.length > 0
-                              ? groupMembersForAvatar
-                              : [{ _id: selectedContact._id || selectedContact.name, name: selectedContact.name || 'G', avatarUrl: selectedContact.avatarUrl || '' }]
                             const totalGroupMembers = normalizedGroupParticipants.length
                             const showGroupCountBadge = totalGroupMembers > 4
+                            const groupAvatarItems = (() => {
+                              const visibleItems = showGroupCountBadge
+                                ? groupMembersForAvatar.slice(0, 3)
+                                : groupMembersForAvatar.slice(0, 4)
+                              return visibleItems.length > 0
+                                ? visibleItems
+                                : [{ _id: selectedContact._id || selectedContact.name, name: selectedContact.name || 'G', avatarUrl: selectedContact.avatarUrl || '' }]
+                            })()
+                            const groupAvatarStackCount = showGroupCountBadge ? 4 : groupAvatarItems.length
 
                             return (
-                              <div className={`group-avatar-stack count-${groupAvatarItems.length}`}>
+                              <div className={`group-avatar-stack count-${groupAvatarStackCount}`}>
                                 {groupAvatarItems.map((member, index) => (
                                   <div className={`group-stack-item pos-${index + 1}`} key={member._id}>
                                     {member.avatarUrl ? (
@@ -1657,7 +1670,7 @@ const Home = () => {
                                   </div>
                                 ))}
                                 {showGroupCountBadge && (
-                                  <span className="group-stack-count">+{totalGroupMembers - 4}</span>
+                                  <span className="group-stack-count">{totalGroupMembers}</span>
                                 )}
                               </div>
                             )
@@ -1984,24 +1997,38 @@ const Home = () => {
                           const pAvatar = p.userId?.avatarUrl || p.avatarUrl || ''
                           return { _id: pId, name: pName, avatarUrl: pAvatar }
                         }).filter(p => p._id)
-                        const groupMembersForavatar = (() => {
-                          const others = normalizedGroupParticipants.filter(p => String(p._id) !== String(user?._id))
-                          const source = others.length > 0 ? others : normalizedGroupParticipants
-                          return source.slice(0, 3)
+                        const groupMembersForAvatar = (() => {
+                          const myId = String(user?._id || '')
+                          const others = normalizedGroupParticipants.filter(p => String(p._id) !== myId)
+                          const me = normalizedGroupParticipants.find(p => String(p._id) === myId)
+                          const source = [...others]
+                          if (source.length < 4 && me) {
+                            source.push(me)
+                          }
+                          if (source.length === 0) {
+                            return normalizedGroupParticipants.slice(0, 4)
+                          }
+                          return source.slice(0, 4)
                         })()
-                        const groupAvatarItems = groupMembersForAvatar.length > 0
-                          ? groupMembersForAvatar
-                          : [{ _id: selectedContact._id || selectedContact.name, name: selectedContact.name || 'G', avatarUrl: selectedContact.avatarUrl || '' }]
                         const totalGroupMembers = normalizedGroupParticipants.length
-                        const showGroupCountBadge = totalGroupMembers > 3
+                        const showGroupCountBadge = totalGroupMembers > 4
+                        const groupAvatarItems = (() => {
+                          const visibleItems = showGroupCountBadge
+                            ? groupMembersForAvatar.slice(0, 3)
+                            : groupMembersForAvatar.slice(0, 4)
+                          return visibleItems.length > 0
+                            ? visibleItems
+                            : [{ _id: selectedContact._id || selectedContact.name, name: selectedContact.name || 'G', avatarUrl: selectedContact.avatarUrl || '' }]
+                        })()
+                        const groupAvatarStackCount = showGroupCountBadge ? 4 : groupAvatarItems.length
 
                         return (
                           <>
                             <div className="info-header">
                               <div className="avatar-large group-avatar-large">
-                                <div className={`group-avatar-stack count-${groupAvatarItems.length}`}>
+                                <div className={`group-avatar-stack count-${groupAvatarStackCount}`}>
                                   {groupAvatarItems.map((member, index) => (
-                                    <div className={`group-stack-item pos-${index + 1}`} key={member._id} style={{ width: '100%', height: '100%', position: 'absolute' }}>
+                                    <div className={`group-stack-item pos-${index + 1}`} key={member._id}>
                                       {member.avatarUrl ? (
                                         <img src={member.avatarUrl} alt={member.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
                                       ) : (
@@ -2580,16 +2607,32 @@ const Home = () => {
                       }).filter(p => p._id)
                       const groupMembersForAvatar = isGroup
                         ? (() => {
-                          const others = normalizedParticipants.filter(p => String(p._id) !== String(user?._id))
-                          const source = others.length > 0 ? others : normalizedParticipants
-                          return source.slice(0, 3)
+                          const myId = String(user?._id || '')
+                          const others = normalizedParticipants.filter(p => String(p._id) !== myId)
+                          const me = normalizedParticipants.find(p => String(p._id) === myId)
+                          const source = [...others]
+                          if (source.length < 4 && me) {
+                            source.push(me)
+                          }
+                          if (source.length === 0) {
+                            return normalizedParticipants.slice(0, 4)
+                          }
+                          return source.slice(0, 4)
                         })()
                         : []
-                      const groupAvatarItems = groupMembersForAvatar.length > 0
-                        ? groupMembersForAvatar
-                        : [{ _id: contact._id || displayName, name: displayName || 'G', avatarUrl: contact.avatarUrl || '' }]
-                      const groupMemberCount = normalizedParticipants.length || groupAvatarItems.length
-                      const showGroupCountBadge = isGroup && groupMemberCount > 3
+                      const groupMemberCount = normalizedParticipants.length || groupMembersForAvatar.length
+                      const showGroupCountBadge = isGroup && groupMemberCount > 4
+                      const groupAvatarItems = isGroup
+                        ? (() => {
+                          const visibleItems = showGroupCountBadge
+                            ? groupMembersForAvatar.slice(0, 3)
+                            : groupMembersForAvatar.slice(0, 4)
+                          return visibleItems.length > 0
+                            ? visibleItems
+                            : [{ _id: contact._id || displayName, name: displayName || 'G', avatarUrl: contact.avatarUrl || '' }]
+                        })()
+                        : []
+                      const groupAvatarStackCount = showGroupCountBadge ? 4 : groupAvatarItems.length
                       const userStatus = !isGroup && userId ? onlineStatus[String(userId)] : null
                       const isOnline = userStatus?.status === 'online'
                       const isConversation = !!contact.type || !!contact.participantId
@@ -2620,7 +2663,7 @@ const Home = () => {
                           >
                             <div className={`avatar ${isGroup ? 'avatar-group-stack' : ''}`}>
                               {isGroup ? (
-                                <div className={`group-avatar-stack count-${groupAvatarItems.length}`}>
+                                <div className={`group-avatar-stack count-${groupAvatarStackCount}`}>
                                   {groupAvatarItems.map((member, index) => (
                                     <div className={`group-stack-item pos-${index + 1}`} key={member._id}>
                                       {member.avatarUrl ? (
