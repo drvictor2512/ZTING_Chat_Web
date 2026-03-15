@@ -35,6 +35,7 @@ const Login = () => {
 
       const response = await authService.login(formData.email, formData.password)
       if (response.token) {
+        window.dispatchEvent(new Event('authChanged'))
         navigate('/home')
       } else {
         setError(response.message || 'Đăng nhập thất bại')

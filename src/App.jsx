@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import Login from './pages/Login'
 import Register from './pages/Register'
@@ -7,8 +7,18 @@ import Home from './pages/Home'
 import authService from './services/authService'
 
 const App = () => {
-  // Đọc trạng thái đăng nhập từ token trong localStorage
-  const isAuthenticated = authService.isAuthenticated()
+  const [isAuthenticated, setIsAuthenticated] = useState(authService.isAuthenticated())
+
+  useEffect(() => {
+    const handleAuthChange = () => {
+      setIsAuthenticated(authService.isAuthenticated())
+    }
+
+    window.addEventListener('authChanged', handleAuthChange)
+    return () => {
+      window.removeEventListener('authChanged', handleAuthChange)
+    }
+  }, [])
 
   return (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>

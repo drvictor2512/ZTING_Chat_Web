@@ -440,6 +440,7 @@ const Home = () => {
   const handleLogout = async () => {
     try {
       await authService.logout()
+      window.dispatchEvent(new Event('authChanged'))
       navigate('/login')
     } catch (err) {
       setError('Không thể đăng xuất')
