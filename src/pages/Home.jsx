@@ -9,6 +9,17 @@ import friendService from '../services/friendService'
 import userService from '../services/userService'
 import socketService from '../services/socketService'
 import { isImageUrl, isVideoUrl, isGifUrl, isDocumentUrl, basenameFromUrl, downloadFile } from '../utils/mediaHelpers'
+import AppSidebar from '../components/home/AppSidebar'
+import ConfirmPopup from '../components/home/ConfirmPopup'
+import ContactsPanel from '../components/home/ContactsPanel'
+import UserProfileModal from '../components/home/UserProfileModal'
+import UserInfoModal from '../components/home/UserInfoModal'
+import AddFriendModal from '../components/home/AddFriendModal'
+import SendRequestModal from '../components/home/SendRequestModal'
+import GroupModals from '../components/home/GroupModals'
+import ChatView from '../components/home/views/ChatView'
+import FriendsView from '../components/home/views/FriendsView'
+import SettingsView from '../components/home/views/SettingsView'
 import '../styles/home.css'
 
 const Home = () => {
@@ -418,7 +429,7 @@ const Home = () => {
         let displayName = c.name || participantName
         if (c.type === 'GROUP') {
           // ưu tiên tên group từ backend
-          displayName = c.groupId?.name || c.name || 'Nhóm không tên'
+          displayName = c.group?.name || c.groupName || c.name || 'Nhóm không tên'
         }
 
         // nếu sau khi chuẩn hoá vẫn không có tên, bỏ qua để tránh dòng trống / lỗi
@@ -1052,6 +1063,8 @@ const Home = () => {
   // send a new message
   // file and emoji support
   const [pendingFile, setPendingFile] = useState(null)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [isUploadingFile, setIsUploadingFile] = useState(false)
   const fileInputRef2 = useRef(null)
   const videoInputRef = useRef(null)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
@@ -1141,6 +1154,7 @@ const Home = () => {
   }, [friends, friendSearchTerm, friendSortOrder])
 
   const handleSendMessage = async () => {
+    if (isUploadingFile) return
     if ((!newMessage.trim() && !pendingFile) || !selectedContact) return
     if (!newMessage.trim() && !pendingFile) {
       setError('Nhập nội dung hoặc chọn file')
@@ -1194,20 +1208,38 @@ const Home = () => {
         }
       }
 
-      // Append file as 'image' field (matching Test_Frontend-main)
+      // Append file as 'image' field
       if (pendingFile) form.append('image', pendingFile)
+
+      const progressHandler = pendingFile
+        ? (evt) => {
+          const total = Number(evt?.total || 0)
+          const loaded = Number(evt?.loaded || 0)
+          if (total > 0) {
+            const percent = Math.min(100, Math.max(0, Math.round((loaded * 100) / total)))
+            setUploadProgress(percent)
+          }
+        }
+        : undefined
+
+      if (pendingFile) {
+        setIsUploadingFile(true)
+        setUploadProgress(0)
+      }
 
       // Send message
       const isGroup = activeConv?.type === 'GROUP'
       let res = isGroup
-        ? await conversationService.sendGroupMessage(form)
-        : await conversationService.sendDirectMessage(form)
+        ? await conversationService.sendGroupMessage(form, progressHandler)
+        : await conversationService.sendDirectMessage(form, progressHandler)
 
       let created = res?.message || null
 
       // Clear input and file
       setNewMessage('')
       setPendingFile(null)
+      setUploadProgress(0)
+      setIsUploadingFile(false)
       setChatNotice('')
       if (fileInputRef2.current) fileInputRef2.current.value = ''
       if (messageInputRef.current) {
@@ -1271,6 +1303,8 @@ const Home = () => {
       }
     } catch (err) {
       console.error('Lỗi khi gửi tin nhắn', err)
+      setIsUploadingFile(false)
+      setUploadProgress(0)
       const msg = err?.message || 'Không thể gửi tin nhắn'
       const lower = String(msg).toLowerCase()
       if (lower.includes('không phải thành viên') || lower.includes('not member')) {
@@ -1594,820 +1628,96 @@ const Home = () => {
     switch (currentView) {
       case 'chat':
         return (
-          <div className="main-area chat-view">
-            {conversations.length === 0 ? (
-              <div className="welcome">
-                <h1>CHÀO MỪNG ĐẾN VỚI ZTING</h1>
-                <p>Giao tiếp không khoảng cách, kết nối không giới hạn</p>
-                <p className="instruction">Chọn một bạn bè hoặc bắt đầu một cuộc trò chuyện để tiếp tục.</p>
-              </div>
-            ) : selectedContact ? (
-              <div className="chat-wrapper">
-                <div className="chat-container">
-                  {(() => {
-                    const removedFromGroup = selectedContact?.type === 'GROUP' && !isCurrentUserMemberOfGroup(selectedContact)
-                    if (!removedFromGroup && !chatNotice) return null
-                    return (
-                      <div style={{ padding: '10px 20px', background: '#fff3cd', color: '#7a5b00', borderBottom: '1px solid #ffe58f', fontSize: '13px' }}>
-                        {chatNotice || 'Bạn không phải thành viên nhóm'}
-                      </div>
-                    )
-                  })()}
-                  <div className="chat-header">
-                    <div className="chat-header-left">
-                      <div
-                        className="chat-avatar-wrapper"
-                        style={{ cursor: selectedContact?.type !== 'GROUP' ? 'pointer' : 'default' }}
-                        onClick={() => {
-                          if (selectedContact?.type !== 'GROUP' && (selectedContact.participantId || selectedContact._id)) {
-                            openUserPopup(selectedContact.participantId || selectedContact._id)
-                          }
-                        }}
-                      >
-                        <div className={`chat-avatar ${selectedContact?.type === 'GROUP' ? 'group-chat-avatar' : ''}`}>
-                          {selectedContact?.type === 'GROUP' ? (() => {
-                            const rawGroupParticipants = Array.isArray(selectedContact.participants) ? selectedContact.participants : []
-                            const normalizedGroupParticipants = rawGroupParticipants.map((p) => {
-                              const pId = p.userId?._id || p._id
-                              const pName = p.userId?.name || p.name || 'U'
-                              const pAvatar = p.userId?.avatarUrl || p.avatarUrl || ''
-                              return { _id: pId, name: pName, avatarUrl: pAvatar }
-                            }).filter(p => p._id)
-                            const groupMembersForAvatar = (() => {
-                              const myId = String(user?._id || '')
-                              const others = normalizedGroupParticipants.filter(p => String(p._id) !== myId)
-                              const me = normalizedGroupParticipants.find(p => String(p._id) === myId)
-                              const source = [...others]
-                              if (source.length < 4 && me) {
-                                source.push(me)
-                              }
-                              if (source.length === 0) {
-                                return normalizedGroupParticipants.slice(0, 4)
-                              }
-                              return source.slice(0, 4)
-                            })()
-                            const totalGroupMembers = normalizedGroupParticipants.length
-                            const showGroupCountBadge = totalGroupMembers > 4
-                            const groupAvatarItems = (() => {
-                              const visibleItems = showGroupCountBadge
-                                ? groupMembersForAvatar.slice(0, 3)
-                                : groupMembersForAvatar.slice(0, 4)
-                              return visibleItems.length > 0
-                                ? visibleItems
-                                : [{ _id: selectedContact._id || selectedContact.name, name: selectedContact.name || 'G', avatarUrl: selectedContact.avatarUrl || '' }]
-                            })()
-                            const groupAvatarStackCount = showGroupCountBadge ? 4 : groupAvatarItems.length
-
-                            return (
-                              <div className={`group-avatar-stack count-${groupAvatarStackCount}`}>
-                                {groupAvatarItems.map((member, index) => (
-                                  <div className={`group-stack-item pos-${index + 1}`} key={member._id}>
-                                    {member.avatarUrl ? (
-                                      <img src={member.avatarUrl} alt={member.name} />
-                                    ) : (
-                                      <span>{(member.name || 'G').charAt(0).toUpperCase()}</span>
-                                    )}
-                                  </div>
-                                ))}
-                                {showGroupCountBadge && (
-                                  <span className="group-stack-count">{totalGroupMembers}</span>
-                                )}
-                              </div>
-                            )
-                          })() : (
-                            <>
-                              {selectedContact?.participantAvatar ? (
-                                <img src={selectedContact.participantAvatar} alt="" />
-                              ) : selectedContact?.avatarUrl ? (
-                                <img src={selectedContact.avatarUrl} alt="" />
-                              ) : (
-                                (selectedContact.participantName || selectedContact.name || 'U').charAt(0).toUpperCase()
-                              )}
-                            </>
-                          )}
-                        </div>
-                        {selectedContact?.type !== 'GROUP' && selectedContact?.participantId && (() => {
-                          const userStatus = onlineStatus[String(selectedContact.participantId)]
-                          const isOnline = userStatus?.status === 'online'
-                          return (
-                            <span className={`status-indicator ${isOnline ? 'online' : 'offline'}`}></span>
-                          )
-                        })()}
-                      </div>
-                      <div className="chat-header-info">
-                        <h2>{selectedContact.name || selectedContact.participantName}</h2>
-                        {selectedContact.type === 'GROUP' ? (
-                          <p className="chat-status">
-                            <MdGroup />
-                            {selectedContact.participants?.length || 0} thành viên
-                          </p>
-                        ) : (
-                          (() => {
-                            const contactId = selectedContact.participantId || selectedContact._id
-                            const text = getUserStatusText(contactId)
-                            return text ? (
-                              <p className="chat-status">{text}</p>
-                            ) : null
-                          })()
-                        )}
-                      </div>
-                    </div>
-                    <MdMenu className="info-toggle" onClick={() => setShowInfoPanel(v => !v)} title="Chi tiết" />
-                    {/* compute status flags */}
-                    {/* compute status flags */}
-                    {(() => {
-                      const contactId = selectedContact.participantId || selectedContact._id;
-                      const isFriend = friends.some(f => f._id === contactId);
-                      const hasSent = sentRequests.some(r => {
-                        const toId = r.toUserId?._id || r.toUserId;
-                        return toId === contactId;
-                      });
-                      const hasReceived = friendRequests.some(r => {
-                        const fromId = r.fromUserId?._id || r.fromUserId;
-                        return fromId === contactId;
-                      });
-                      return (
-                        <>
-                          {isFriend && (
-                            <button className="btn-unfriend" onClick={() => handleUnfriend(contactId)}>
-                              Huỷ kết bạn
-                            </button>
-                          )}
-                        </>
-                      )
-                    })()}
-                  </div>
-                  <div className="chat-messages">
-                    {messages.length === 0 ? (
-                      <p className="no-messages">Bạn chưa có tin nhắn nào. Hãy gửi tin nhắn để bắt đầu cuộc trò chuyện!</p>
-                    ) : (
-                      (() => {
-                        const groups = []
-                        messages.forEach((msg) => {
-                          const isSystem = isSystemGroupMessage(msg)
-
-                          if (isSystem) {
-                            groups.push({
-                              isSystem: true,
-                              messages: [msg],
-                              createdAt: msg.createdAt
-                            })
-                            return
-                          }
-
-                          const isMine = String(msg.senderId?._id || msg.senderId) === String(user?._id)
-
-                          const prevGroup = groups.length ? groups[groups.length - 1] : null
-                          const canAppendToPrev =
-                            prevGroup &&
-                            !prevGroup.isSystem &&
-                            String(prevGroup.senderId) === String(msg.senderId?._id || msg.senderId) &&
-                            prevGroup.isMine === isMine
-
-                          if (!canAppendToPrev) {
-                            groups.push({
-                              senderId: msg.senderId?._id || msg.senderId,
-                              senderName: msg.senderId?.name,
-                              senderAvatar: msg.senderId?.avatarUrl,
-                              isMine,
-                              messages: [msg],
-                              createdAt: msg.createdAt
-                            })
-                          } else {
-                            prevGroup.messages.push(msg)
-                          }
-                        })
-
-                        const result = []
-                        groups.forEach((group, groupIdx) => {
-                          // Add date divider if this is the first message or if date changed
-                          const prevGroup = groupIdx > 0 ? groups[groupIdx - 1] : null
-                          const showDateDivider = !prevGroup || isDifferentDay(group.createdAt, prevGroup.createdAt)
-
-                          if (showDateDivider && group.createdAt) {
-                            result.push(
-                              <div key={`divider-${groupIdx}`} className="date-divider">
-                                {formatDateDivider(group.createdAt)}
-                              </div>
-                            )
-                          }
-
-                          if (group.isSystem) {
-                            const sysMsg = group.messages[0]
-                            const sysText = sysMsg?.isRecalled ? 'Tin nhắn đã được thu hồi' : (sysMsg?.content || '')
-                            result.push(
-                              <div key={`system-${groupIdx}`} className="system-message-row">
-                                <span className="system-message-pill">{sysText}</span>
-                              </div>
-                            )
-                            return
-                          }
-
-                          result.push(
-                            <div key={`group-${groupIdx}`} className={`message-group ${group.isMine ? 'sent-group' : 'received-group'}`}>
-                              {!group.isMine && (
-                                <div className="group-avatar" onClick={() => openUserPopup(group.senderId)}>
-                                  {group.senderAvatar ? (
-                                    <img src={group.senderAvatar} alt="" />
-                                  ) : (
-                                    (group.senderName ? group.senderName.charAt(0).toUpperCase() : 'U')
-                                  )}
-                                </div>
-                              )}
-                              <div className="group-messages">
-                                {!group.isMine && (
-                                  <div className="group-sender-name">{group.senderName || 'User'}</div>
-                                )}
-                                {group.messages.map(msg => (
-                                  <div key={msg._id || msg.id || Math.random()} className="message-item">
-                                    {msg.isRecalled ? (
-                                      <span className="message-content recalled">
-                                        <em>Tin nhắn đã được thu hồi</em>
-                                      </span>
-                                    ) : (
-                                      <span className="message-content">
-                                        {msg.fileUrl ? (
-                                          <>
-                                            {isGifUrl(msg.fileUrl) ? (
-                                              <img src={msg.fileUrl} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.fileUrl, 'image')} />
-                                            ) : isImageUrl(msg.fileUrl) ? (
-                                              <img src={msg.fileUrl} alt="attachment" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.fileUrl, 'image')} />
-                                            ) : isVideoUrl(msg.fileUrl) ? (
-                                              <div className="message-video-preview" style={{ position: 'relative', maxWidth: '300px', borderRadius: '8px', cursor: 'pointer', overflow: 'hidden' }} onClick={() => openMediaModal(msg.fileUrl, 'video')}>
-                                                <video src={msg.fileUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
-                                                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.24)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                  <span style={{ fontSize: 26, color: '#fff', fontWeight: 700 }}>▶</span>
-                                                </div>
-                                              </div>
-                                            ) : (
-                                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                <span className="message-file">{basenameFromUrl(msg.fileUrl)}</span>
-                                                <button onClick={() => downloadFile(msg.fileUrl, basenameFromUrl(msg.fileUrl))} title="Tải về" style={{ background: '#eef2ff', border: '1px solid #bfdbfe', color: '#1d4ed8', borderRadius: 6, fontSize: 13, fontWeight: 600, padding: '4px 8px', cursor: 'pointer' }}>⬇ Tải về</button>
-                                              </div>
-                                            )}
-                                            {msg.content && <div style={{ marginTop: 4 }}>{msg.content}</div>}
-                                          </>
-                                        ) : isGifUrl(msg.content) ? (
-                                          <img src={msg.content} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.content, 'image')} />
-                                        ) : isImageUrl(msg.content) ? (
-                                          <img src={msg.content} alt="image" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.content, 'image')} />
-                                        ) : isVideoUrl(msg.content) ? (
-                                          <div className="message-video-preview" style={{ position: 'relative', maxWidth: '300px', borderRadius: '8px', cursor: 'pointer', overflow: 'hidden' }} onClick={() => openMediaModal(msg.content, 'video')}>
-                                            <video src={msg.content} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
-                                            <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.24)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                              <span style={{ fontSize: 26, color: '#fff', fontWeight: 700 }}>▶</span>
-                                            </div>
-                                          </div>
-                                        ) : isDocumentUrl(msg.content) ? (
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                            <span className="message-file">{basenameFromUrl(msg.content)}</span>
-                                            <button onClick={() => downloadFile(msg.content, basenameFromUrl(msg.content))} title="Tải về" style={{ background: '#eef2ff', border: '1px solid #bfdbfe', color: '#1d4ed8', borderRadius: 6, fontSize: 13, fontWeight: 600, padding: '4px 8px', cursor: 'pointer' }}>⬇ Tải về</button>
-                                          </div>
-                                        ) : (
-                                          <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</span>
-                                        )}
-                                      </span>
-                                    )}
-                                    {msg.createdAt && (
-                                      <span className="message-time">{formatTime(msg.createdAt)}</span>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )
-                        })
-
-                        return result
-                      })()
-                    )}
-                    <div ref={messagesEndRef} />
-                  </div>
-
-                  {showMediaModal && mediaModalUrl && (
-                    <div onClick={closeMediaModal} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999, flexDirection: 'column', gap: 16 }}>
-                      <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '80vh' }} onClick={e => e.stopPropagation()}>
-                        {mediaModalType === 'video' ? (
-                          <video src={mediaModalUrl} controls autoPlay style={{ maxWidth: '90vw', maxHeight: '80vh', borderRadius: 8, display: 'block' }} />
-                        ) : (
-                          <img src={mediaModalUrl} alt={mediaModalName || 'media'} style={{ maxWidth: '90vw', maxHeight: '80vh', objectFit: 'contain', borderRadius: 8, display: 'block' }} />
-                        )}
-                        <button onClick={closeMediaModal} title="Đóng" style={{ position: 'absolute', top: -12, right: -12, background: 'rgba(0,0,0,0.6)', border: 'none', color: '#fff', borderRadius: '50%', width: 32, height: 32, fontSize: 18, cursor: 'pointer' }}>✕</button>
-                      </div>
-                      <button onClick={() => downloadFile(mediaModalUrl, mediaModalName || 'download')} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#1d4ed8', color: '#fff', padding: '8px 20px', borderRadius: 8, border: 'none', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>⬇ Tải về</button>
-                    </div>
-                  )}
-
-                  <div className="chat-input">
-                    {pendingFile && (
-                      <div className="chat-file-preview">
-                        <span className="chat-file-preview-name">{pendingFile.name}</span>
-                        <button
-                          onClick={() => {
-                            setPendingFile(null)
-                            if (fileInputRef2.current) fileInputRef2.current.value = ''
-                            if (videoInputRef.current) videoInputRef.current.value = ''
-                          }}
-                          className="chat-file-preview-remove"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    )}
-
-                    <div className="chat-input-row">
-                      <div className="chat-input-left-icons">
-                        <button
-                          className="icon-btn emoji-btn"
-                          title="Emoji"
-                          onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                        >
-                          <MdEmojiEmotions />
-                        </button>
-                        <input
-                          ref={fileInputRef2}
-                          type="file"
-                          accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
-                          style={{ display: 'none' }}
-                          onChange={handleFileChange}
-                        />
-                        <button className="icon-btn attach-btn" onClick={() => fileInputRef2.current?.click()} title="Đính kèm">
-                          <MdAttachFile />
-                        </button>
-                        <button className="icon-btn video-btn" onClick={() => videoInputRef.current?.click()} title="Gửi video">
-                          <MdVideocam />
-                        </button>
-                        <input
-                          ref={videoInputRef}
-                          type="file"
-                          accept="video/*"
-                          style={{ display: 'none' }}
-                          onChange={handleFileChange}
-                        />
-                      </div>
-
-                      <input
-                        className="chat-text-input"
-                        value={newMessage}
-                        onChange={e => setNewMessage(e.target.value)}
-                        placeholder="Nhập tin nhắn..."
-                        onKeyDown={async e => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault()
-                            if (!newMessage.trim() && !pendingFile) return
-                            await handleSendMessage()
-                          }
-                        }}
-                      />
-
-                      <button className="chat-send-button" onClick={handleSendMessage}>
-                        <MdSend /> Gửi
-                      </button>
-                    </div>
-
-                    {showEmojiPicker && (
-                      <div className="emoji-picker-container" ref={emojiPickerRef}>
-                        <EmojiPicker
-                          onEmojiClick={(emojiData) => {
-                            const emoji = emojiData?.emoji || emojiData
-                            setNewMessage(prev => prev + (emoji || ''))
-                            setShowEmojiPicker(false)
-                          }}
-                          width="100%"
-                          height={400}
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-                {showInfoPanel && selectedContact && (
-                  <div className="info-panel">
-                    {selectedContact.type === 'GROUP' ? (
-                      (() => {
-                        const myRoleType = getMyGroupRoleType(selectedContact)
-                        const canRenameGroup = myRoleType === 'OWNER' || myRoleType === 'DEPUTY'
-                        const canManageMembers = myRoleType === 'OWNER' || myRoleType === 'DEPUTY'
-                        const canManageRoles = myRoleType === 'OWNER'
-
-                        // Render composite group avatar (Zalo style)
-                        const rawGroupParticipants = Array.isArray(selectedContact.participants) ? selectedContact.participants : []
-                        const normalizedGroupParticipants = rawGroupParticipants.map((p) => {
-                          const pId = p.userId?._id || p._id
-                          const pName = p.userId?.name || p.name || 'U'
-                          const pAvatar = p.userId?.avatarUrl || p.avatarUrl || ''
-                          return { _id: pId, name: pName, avatarUrl: pAvatar }
-                        }).filter(p => p._id)
-                        const groupMembersForAvatar = (() => {
-                          const myId = String(user?._id || '')
-                          const others = normalizedGroupParticipants.filter(p => String(p._id) !== myId)
-                          const me = normalizedGroupParticipants.find(p => String(p._id) === myId)
-                          const source = [...others]
-                          if (source.length < 4 && me) {
-                            source.push(me)
-                          }
-                          if (source.length === 0) {
-                            return normalizedGroupParticipants.slice(0, 4)
-                          }
-                          return source.slice(0, 4)
-                        })()
-                        const totalGroupMembers = normalizedGroupParticipants.length
-                        const showGroupCountBadge = totalGroupMembers > 4
-                        const groupAvatarItems = (() => {
-                          const visibleItems = showGroupCountBadge
-                            ? groupMembersForAvatar.slice(0, 3)
-                            : groupMembersForAvatar.slice(0, 4)
-                          return visibleItems.length > 0
-                            ? visibleItems
-                            : [{ _id: selectedContact._id || selectedContact.name, name: selectedContact.name || 'G', avatarUrl: selectedContact.avatarUrl || '' }]
-                        })()
-                        const groupAvatarStackCount = showGroupCountBadge ? 4 : groupAvatarItems.length
-
-                        return (
-                          <>
-                            <div className="info-header">
-                              <div className="avatar-large group-avatar-large">
-                                <div className={`group-avatar-stack count-${groupAvatarStackCount}`}>
-                                  {groupAvatarItems.map((member, index) => (
-                                    <div className={`group-stack-item pos-${index + 1}`} key={member._id}>
-                                      {member.avatarUrl ? (
-                                        <img src={member.avatarUrl} alt={member.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-                                      ) : (
-                                        <span style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: '#ccc', fontSize: '18px', fontWeight: 'bold' }}>{(member.name || 'G').charAt(0).toUpperCase()}</span>
-                                      )}
-                                    </div>
-                                  ))}
-                                  {showGroupCountBadge && (
-                                    <span className="group-stack-count">{totalGroupMembers}</span>
-                                  )}
-                                </div>
-                              </div>
-                              <h3>{selectedContact.name}</h3>
-                              <p>{totalGroupMembers} thành viên</p>
-                              <div className="group-actions">
-                                <button className="member-action-btn" onClick={handleOpenAddMembersModal} disabled={groupActionLoading}>Thêm thành viên</button>
-                                <MdLink className="action-icon" title="Mã mời nhóm" onClick={handleGetInviteLink} />
-                                {canRenameGroup && (
-                                  <MdEdit className="action-icon" title="Đổi tên nhóm" onClick={handleRenameGroup} />
-                                )}
-                              </div>
-                            </div>
-                            <div className="info-body">
-                              <div className="info-section members">
-                                <h4>Thành viên ({selectedContact.participants?.length || 0})</h4>
-                                {selectedContact.participants?.map(p => {
-                                  const userId = p.userId?._id || p._id
-                                  const userName = p.userId?.name || p.name || 'User'
-                                  const userAvatar = p.userId?.avatarUrl || p.avatarUrl || ''
-                                  const fullName = `${userName}${String(userId) === String(user?._id) ? ' (Bạn)' : ''}`
-                                  const fullRole = getRoleLabel(p.role)
-                                  const roleType = normalizeRoleType(p.role)
-                                  const isSelf = String(userId) === String(user?._id)
-                                  const canRemove = canManageMembers && !isSelf && roleType !== 'OWNER'
-                                  const canPromote = canManageRoles && !isSelf && roleType === 'MEMBER'
-                                  const canDemote = canManageRoles && !isSelf && roleType === 'DEPUTY'
-
-                                  return (
-                                    <div className="member-item" key={userId}>
-                                      <div className="member-main" title={`${fullName} - ${fullRole}`}>
-                                        <div className="member-avatar">
-                                          {userAvatar ? (
-                                            <img src={userAvatar} alt={userName} />
-                                          ) : (
-                                            (userName || 'U').charAt(0).toUpperCase()
-                                          )}
-                                        </div>
-                                        <div className="member-meta">
-                                          <span className="member-name">{fullName}</span>
-                                          <span className="member-role">{fullRole}</span>
-                                        </div>
-                                      </div>
-                                      <div className="member-actions-inline">
-                                        {canPromote && (
-                                          <button className="member-action-btn" onClick={() => handlePromoteMember(userId, userName)} disabled={groupActionLoading}>Phó nhóm</button>
-                                        )}
-                                        {canDemote && (
-                                          <button className="member-action-btn member-action-warn" onClick={() => handleDemoteMember(userId, userName)} disabled={groupActionLoading}>Thu hồi quyền</button>
-                                        )}
-                                        {canRemove && (
-                                          <button className="member-action-btn member-action-danger" onClick={() => handleRemoveGroupMember(userId, userName)} disabled={groupActionLoading}>Xóa</button>
-                                        )}
-                                      </div>
-                                    </div>
-                                  )
-                                })}
-                              </div>
-                              <div className="info-section">
-                                <h4>Ảnh/Video</h4>
-                              </div>
-                              <div className="info-section">
-                                <h4>File</h4>
-                              </div>
-
-                              <div className="group-footer-actions">
-                                <button className="btn-danger" onClick={handleLeaveGroup} disabled={groupActionLoading}>Rời nhóm</button>
-                                {myRoleType === 'OWNER' && (
-                                  <button className="btn-danger" onClick={handleDeleteGroup} disabled={groupActionLoading}>Xóa nhóm</button>
-                                )}
-                              </div>
-                            </div>
-                          </>
-                        )
-                      })()
-                    ) : (
-                      <>
-                        <div className="info-header">
-                          <div className="avatar-large">
-                            {(selectedContact.participantName || selectedContact.name || 'U').charAt(0).toUpperCase()}
-                          </div>
-                          <h3>{selectedContact.participantName || selectedContact.name}</h3>
-                          {(() => {
-                            const contactId = selectedContact.participantId || selectedContact._id
-                            const text = getUserStatusText(contactId)
-                            return text ? (
-                              <p className="info-status">{text}</p>
-                            ) : null
-                          })()}
-                          <button className="btn-block" onClick={toggleBlock}>
-                            {blockedUsers.includes(selectedContact.participantId) ? 'Bỏ chặn' : 'Chặn'}
-                          </button>
-                        </div>
-                        <div className="info-body">
-                          <div className="info-section">
-                            <h4>Ảnh/Video</h4>
-                          </div>
-                          <div className="info-section">
-                            <h4>File</h4>
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="welcome">
-                <h1>CHÀO MỪNG ĐẾN VỚI ZTING</h1>
-                <p>Giao tiếp không khoảng cách, kết nối không giới hạn</p>
-              </div>
-            )}
-          </div>
+          <ChatView
+            conversations={conversations}
+            selectedContact={selectedContact}
+            isCurrentUserMemberOfGroup={isCurrentUserMemberOfGroup}
+            chatNotice={chatNotice}
+            openUserPopup={openUserPopup}
+            user={user}
+            onlineStatus={onlineStatus}
+            getUserStatusText={getUserStatusText}
+            showInfoPanel={showInfoPanel}
+            setShowInfoPanel={setShowInfoPanel}
+            friends={friends}
+            sentRequests={sentRequests}
+            friendRequests={friendRequests}
+            handleUnfriend={handleUnfriend}
+            messages={messages}
+            isSystemGroupMessage={isSystemGroupMessage}
+            isDifferentDay={isDifferentDay}
+            formatDateDivider={formatDateDivider}
+            isGifUrl={isGifUrl}
+            isImageUrl={isImageUrl}
+            isVideoUrl={isVideoUrl}
+            isDocumentUrl={isDocumentUrl}
+            basenameFromUrl={basenameFromUrl}
+            openMediaModal={openMediaModal}
+            downloadFile={downloadFile}
+            formatTime={formatTime}
+            messagesEndRef={messagesEndRef}
+            showMediaModal={showMediaModal}
+            mediaModalUrl={mediaModalUrl}
+            closeMediaModal={closeMediaModal}
+            mediaModalType={mediaModalType}
+            mediaModalName={mediaModalName}
+            pendingFile={pendingFile}
+            isUploadingFile={isUploadingFile}
+            setPendingFile={setPendingFile}
+            setUploadProgress={setUploadProgress}
+            fileInputRef2={fileInputRef2}
+            videoInputRef={videoInputRef}
+            uploadProgress={uploadProgress}
+            showEmojiPicker={showEmojiPicker}
+            setShowEmojiPicker={setShowEmojiPicker}
+            handleFileChange={handleFileChange}
+            newMessage={newMessage}
+            setNewMessage={setNewMessage}
+            handleSendMessage={handleSendMessage}
+            emojiPickerRef={emojiPickerRef}
+            getMyGroupRoleType={getMyGroupRoleType}
+            groupActionLoading={groupActionLoading}
+            handleOpenAddMembersModal={handleOpenAddMembersModal}
+            handleGetInviteLink={handleGetInviteLink}
+            handleRenameGroup={handleRenameGroup}
+            getRoleLabel={getRoleLabel}
+            normalizeRoleType={normalizeRoleType}
+            handlePromoteMember={handlePromoteMember}
+            handleDemoteMember={handleDemoteMember}
+            handleRemoveGroupMember={handleRemoveGroupMember}
+            handleLeaveGroup={handleLeaveGroup}
+            handleDeleteGroup={handleDeleteGroup}
+            toggleBlock={toggleBlock}
+            blockedUsers={blockedUsers}
+          />
         )
 
       case 'friends':
         return (
-          <div className="main-area friends-view">
-            {friendsView === 'friend-requests' ? (
-              <div className="friends-detail-view">
-                <div className="fl-page-header">
-                  <MdPersonAdd className="fl-page-icon" />
-                  <h2 className="fl-page-title">Lời mời kết bạn</h2>
-                </div>
-                <div className="fr-content">
-                  <div className="fr-section-header">Lời mời đã nhận ({friendRequests.length})</div>
-                  {friendRequests.length > 0 ? (
-                    <div className="fr-card-grid">
-                      {friendRequests.map(request => (
-                        <div key={request._id} className="fr-card">
-                          <div className="fr-card-top">
-                            <div className="fr-card-avatar">
-                              {request.fromUserId?.avatarUrl ? (
-                                <img src={request.fromUserId.avatarUrl} alt={request.fromUserId.name} />
-                              ) : (
-                                request.fromUserId?.name?.charAt(0).toUpperCase() || 'U'
-                              )}
-                            </div>
-                            <div className="fr-card-info">
-                              <span className="fr-card-name">{request.fromUserId?.name}</span>
-                              <span className="fr-card-meta">
-                                {request.createdAt ? new Date(request.createdAt).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) + ' - ' : ''}
-                                Từ danh thiếp
-                              </span>
-                            </div>
-                            <button
-                              className="fr-chat-btn"
-                              title="Nhắn tin"
-                              onClick={(e) => { e.stopPropagation(); handleContactClick(request.fromUserId); setCurrentView('chat') }}
-                            >
-                              <MdChat />
-                            </button>
-                          </div>
-                          {request.message && (
-                            <div className="fr-card-message">{request.message}</div>
-                          )}
-                          <div className="fr-card-actions">
-                            <button className="fr-btn-decline" onClick={() => handleDeclineRequest(request._id)}>Từ chối</button>
-                            <button className="fr-btn-accept" onClick={() => handleAcceptRequest(request._id)}>Đồng ý</button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="fr-empty">Chưa có lời mời kết bạn nào</div>
-                  )}
-                  {sentRequests.length > 0 && (
-                    <>
-                      <div className="fr-section-header fr-section-header--spaced">Lời mời đã gửi ({sentRequests.length})</div>
-                      <div className="fr-card-grid">
-                        {sentRequests.map(request => (
-                          <div key={request._id} className="fr-card">
-                            <div className="fr-card-top">
-                              <div className="fr-card-avatar">
-                                {request.toUserId?.avatarUrl ? (
-                                  <img src={request.toUserId.avatarUrl} alt={request.toUserId.name} />
-                                ) : (
-                                  request.toUserId?.name?.charAt(0).toUpperCase() || 'U'
-                                )}
-                              </div>
-                              <div className="fr-card-info">
-                                <span className="fr-card-name">{request.toUserId?.name}</span>
-                                <span className="fr-card-meta">
-                                  {request.createdAt ? new Date(request.createdAt).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : 'Đã gửi lời mời'}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="fr-card-actions">
-                              <button className="fr-btn-revoke" onClick={() => handleRevokeRequest(request._id, request.toUserId?._id || request.toUserId)}>Thu hồi lời mời</button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            ) : friendsView === 'group-list' ? (
-              <div className="friends-detail-view">
-                <div className="fl-page-header">
-                  <MdGroup className="fl-page-icon" />
-                  <h2 className="fl-page-title">Danh sách nhóm</h2>
-                </div>
-                {(() => {
-                  const myGroups = conversations.filter(c => c.type === 'GROUP')
-                  const filtered = myGroups
-                    .filter(g => (g.name || '').toLowerCase().includes(groupSearchTerm.toLowerCase()))
-                    .sort((a, b) => groupSortOrder === 'Z-A'
-                      ? (b.name || '').localeCompare(a.name || '', 'vi')
-                      : (a.name || '').localeCompare(b.name || '', 'vi')
-                    )
-                  return (
-                    <>
-                      <div className="fl-sub-header">
-                        Nhóm ({myGroups.length})
-                      </div>
-                      <div className="fl-toolbar">
-                        <div className="fl-search-box">
-                          <svg className="fl-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-                          <input
-                            type="text"
-                            placeholder="Tìm nhóm"
-                            value={groupSearchTerm}
-                            onChange={e => setGroupSearchTerm(e.target.value)}
-                            className="fl-search-input"
-                          />
-                        </div>
-                        <select
-                          value={groupSortOrder}
-                          onChange={e => setGroupSortOrder(e.target.value)}
-                          className="fl-sort-select"
-                        >
-                          <option value="A-Z">Tên A-Z</option>
-                          <option value="Z-A">Tên Z-A</option>
-                        </select>
-                      </div>
-                      {filtered.length === 0 ? (
-                        <div className="empty-state">
-                          <p>{groupSearchTerm ? 'Không tìm thấy nhóm nào' : 'Bạn chưa tham gia nhóm nào'}</p>
-                        </div>
-                      ) : (
-                        <div className="fl-list">
-                          {filtered.map(group => (
-                            <div
-                              key={group._id}
-                              className="fl-friend-row"
-                              onClick={() => { handleContactClick(group); setCurrentView('chat') }}
-                            >
-                              <div className="fl-avatar" style={{ backgroundColor: '#003399', fontSize: '16px' }}>
-                                {group.avatarUrl ? (
-                                  <img src={group.avatarUrl} alt={group.name} />
-                                ) : (
-                                  (group.name || 'G').charAt(0).toUpperCase()
-                                )}
-                              </div>
-                              <span className="fl-name">{group.name}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  )
-                })()}
-              </div>
-            ) : friendsView === 'group-invites' ? (
-              <div className="friends-detail-view">
-                <div className="fl-page-header">
-                  <MdEmail className="fl-page-icon" />
-                  <h2 className="fl-page-title">Lời mời vào nhóm và cộng đồng</h2>
-                </div>
-                <div className="empty-state">
-                  <p>Chưa có lời mời nào</p>
-                </div>
-              </div>
-            ) : (
-              <div className="friends-detail-view">
-                <div className="fl-page-header">
-                  <MdContacts className="fl-page-icon" />
-                  <h2 className="fl-page-title">Danh sách bạn bè</h2>
-                </div>
-                <div className="fl-sub-header">
-                  Bạn bè ({filteredFriends.length})
-                </div>
-                <div className="fl-toolbar">
-                  <div className="fl-search-box">
-                    <svg className="fl-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-                    <input
-                      type="text"
-                      placeholder="Tìm bạn"
-                      value={friendSearchTerm}
-                      onChange={(e) => setFriendSearchTerm(e.target.value)}
-                      className="fl-search-input"
-                    />
-                  </div>
-                  <select
-                    value={friendSortOrder}
-                    onChange={(e) => setFriendSortOrder(e.target.value)}
-                    className="fl-sort-select"
-                  >
-                    <option value="A-Z">↕ Tên (A-Z)</option>
-                    <option value="Z-A">↕ Tên (Z-A)</option>
-                  </select>
-                </div>
-                {filteredFriends.length > 0 ? (() => {
-                  const groups = {}
-                  filteredFriends.forEach(f => {
-                    const letter = (f.name || 'U').charAt(0).toUpperCase()
-                    if (!groups[letter]) groups[letter] = []
-                    groups[letter].push(f)
-                  })
-                  const sortedLetters = Object.keys(groups).sort((a, b) =>
-                    friendSortOrder === 'Z-A' ? b.localeCompare(a) : a.localeCompare(b)
-                  )
-                  return (
-                    <div className="fl-list">
-                      {sortedLetters.map(letter => (
-                        <div key={letter} className="fl-group">
-                          <div className="fl-group-letter">{letter}</div>
-                          {groups[letter].map(friend => (
-                            <div
-                              key={friend._id}
-                              className="fl-friend-row"
-                              onClick={() => { handleContactClick(friend); setCurrentView('chat') }}
-                            >
-                              <div className="fl-avatar">
-                                {friend.avatarUrl ? (
-                                  <img src={friend.avatarUrl} alt={friend.name} />
-                                ) : (
-                                  friend.name?.charAt(0).toUpperCase() || 'U'
-                                )}
-                              </div>
-                              <span className="fl-name">{friend.name}</span>
-                              <button
-                                className="fl-more-btn"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  setFriendMenuOpen(friendMenuOpen === friend._id ? null : friend._id)
-                                }}
-                                title="Tùy chọn"
-                              >
-                                ···
-                              </button>
-                              {friendMenuOpen === friend._id && (
-                                <div className="fl-friend-menu">
-                                  <button onClick={(e) => { e.stopPropagation(); handleContactClick(friend); setCurrentView('chat'); setFriendMenuOpen(null) }}>
-                                    Nhắn tin
-                                  </button>
-                                  <button onClick={(e) => { e.stopPropagation(); handleUnfriend(friend._id); setFriendMenuOpen(null) }}>
-                                    Hủy kết bạn
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                  )
-                })() : friends.length === 0 ? (
-                  <div className="empty-state">
-                    <p>Chưa có bạn nào. Hãy thêm bạn để bắt đầu!</p>
-                  </div>
-                ) : (
-                  <div className="empty-state">
-                    <p>Không tìm thấy bạn nào phù hợp</p>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          <FriendsView
+            friendsView={friendsView}
+            friendRequests={friendRequests}
+            sentRequests={sentRequests}
+            handleContactClick={handleContactClick}
+            setCurrentView={setCurrentView}
+            handleDeclineRequest={handleDeclineRequest}
+            handleAcceptRequest={handleAcceptRequest}
+            handleRevokeRequest={handleRevokeRequest}
+            conversations={conversations}
+            groupSearchTerm={groupSearchTerm}
+            setGroupSearchTerm={setGroupSearchTerm}
+            groupSortOrder={groupSortOrder}
+            setGroupSortOrder={setGroupSortOrder}
+            filteredFriends={filteredFriends}
+            friendSearchTerm={friendSearchTerm}
+            setFriendSearchTerm={setFriendSearchTerm}
+            friendSortOrder={friendSortOrder}
+            setFriendSortOrder={setFriendSortOrder}
+            friendMenuOpen={friendMenuOpen}
+            setFriendMenuOpen={setFriendMenuOpen}
+            handleUnfriend={handleUnfriend}
+            friends={friends}
+          />
         )
 
       case 'ai':
@@ -2430,31 +1740,13 @@ const Home = () => {
 
       case 'settings':
         return (
-          <div className="main-area settings-view">
-            <div className="settings-container">
-              <h2>Cài đặt</h2>
-              <div className="settings-sections">
-                <div className="settings-section">
-                  <h3>Bảo mật</h3>
-                  <div className="settings-item">
-                    <button className="btn-danger" onClick={() => {
-                      setError('')
-                      setShowChangePassword(true)
-                    }}>Đổi mật khẩu</button>
-                  </div>
-                </div>
-
-                <div className="settings-section">
-                  <h3>Khác</h3>
-                  <div className="settings-item">
-                    <button className="btn-logout" onClick={handleLogout}>
-                      <MdLogout /> Đăng xuất
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <SettingsView
+            onOpenChangePassword={() => {
+              setError('')
+              setShowChangePassword(true)
+            }}
+            onLogout={handleLogout}
+          />
         )
 
       default:
@@ -2465,601 +1757,90 @@ const Home = () => {
   return (
     <>
       <div className="home-container">
-        <div className="sidebar">
-          <div
-            className="avatar user-avatar"
-            onClick={openProfile}
-            title="Hồ sơ người dùng"
-          >
-            {user?.avatarUrl ? (
-              <img src={user.avatarUrl} alt="avatar" />
-            ) : (
-              (user?.name ? user.name.charAt(0).toUpperCase() : 'U')
-            )}
-          </div>
+        <AppSidebar
+          user={user}
+          currentView={currentView}
+          friendRequestCount={friendRequests.length}
+          onOpenProfile={openProfile}
+          onChangeView={handleViewChange}
+        />
 
-          <div
-            className={`icon ${currentView === 'chat' ? 'active' : ''}`}
-            onClick={() => handleViewChange('chat')}
-            title="Tin nhắn"
-          >
-            <MdChat />
-          </div>
-
-          <div
-            className={`icon ${currentView === 'friends' ? 'active' : ''}`}
-            onClick={() => handleViewChange('friends')}
-            title="Danh bạ"
-          >
-            <MdContacts />
-            {friendRequests.length > 0 && (
-              <span className="sidebar-badge">{friendRequests.length > 99 ? '99+' : friendRequests.length}</span>
-            )}
-          </div>
-
-          <div
-            className={`icon ${currentView === 'ai' ? 'active' : ''}`}
-            onClick={() => handleViewChange('ai')}
-            title="Trợ lý AI"
-          >
-            <MdSmartToy />
-          </div>
-
-          <div
-            className={`icon settings-icon ${currentView === 'settings' ? 'active' : ''}`}
-            onClick={() => handleViewChange('settings')}
-            title="Cài đặt"
-          >
-            <MdSettings />
-          </div>
-        </div>
-
-        {(currentView === 'friends' || currentView === 'chat') && (
-          <div className="contacts-panel">
-            {currentView === 'chat' || currentView === 'friends' ? (
-              <>
-                <div className="contacts-header">
-                  <div className="search-wrapper">
-                    <MdEdit className="search-icon" />
-                    <input
-                      className="search"
-                      placeholder="Tìm tên/ email"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                  </div>
-                  <div className="contacts-icon-group">
-                    <div className="icon" title="Thêm bạn" onClick={() => setShowAddFriendModal(true)}>
-                      <MdPersonAdd />
-                    </div>
-                    <div className="icon" title="Tạo nhóm chat" onClick={() => setShowCreateGroupModal(true)}>
-                      <MdPeople />
-                    </div>
-                    <div className="icon" title="Tham gia nhóm bằng mã" onClick={() => { setShowJoinGroupModal(true); setJoinGroupCode('') }}>
-                      <MdLink />
-                    </div>
-                  </div>
-                </div>
-
-                {error && <div className="error-message">{error}</div>}
-
-                {currentView === 'friends' ? (
-                  <nav className="friends-nav">
-                    <div
-                      className={`friends-nav-item ${friendsView === 'friends-list' ? 'active' : ''}`}
-                      onClick={() => setFriendsView('friends-list')}
-                    >
-                      <MdContacts className="friends-nav-icon" />
-                      <span>Danh sách bạn bè</span>
-                    </div>
-                    <div
-                      className={`friends-nav-item ${friendsView === 'group-list' ? 'active' : ''}`}
-                      onClick={() => setFriendsView('group-list')}
-                    >
-                      <MdGroup className="friends-nav-icon" />
-                      <span>Danh sách nhóm</span>
-                    </div>
-                    <div
-                      className={`friends-nav-item ${friendsView === 'friend-requests' ? 'active' : ''}`}
-                      onClick={() => { setFriendsView('friend-requests'); loadFriendRequests() }}
-                    >
-                      <MdPersonAdd className="friends-nav-icon" />
-                      <span>Lời mời kết bạn</span>
-                      {friendRequests.length > 0 && (
-                        <span className="friends-nav-badge">{friendRequests.length}</span>
-                      )}
-                    </div>
-                    <div
-                      className={`friends-nav-item ${friendsView === 'group-invites' ? 'active' : ''}`}
-                      onClick={() => setFriendsView('group-invites')}
-                    >
-                      <MdEmail className="friends-nav-icon" />
-                      <span>Lời mời vào nhóm và cộng đồng</span>
-                    </div>
-                  </nav>
-                ) : loading ? (
-                  <div className="loading-state">
-                    <p>Đang tải...</p>
-                  </div>
-                ) : filteredContacts.length === 0 ? (
-                  <div className="empty-contacts">
-                    <p>Không tìm thấy liên hệ nào</p>
-                  </div>
-                ) : (
-                  filteredContacts
-                    // bỏ qua các item không có tên hiển thị để tránh dòng trống
-                    .filter(contact => (contact.name || contact.participantName || contact.groupId?.name || contact.email))
-                    .map(contact => {
-                      const displayName = contact.name || contact.participantName || contact.groupId?.name || contact.email || ''
-                      const avatarUrl = contact.participantAvatar || contact.avatarUrl
-                      const userId = contact.participantId || contact._id
-                      const isGroup = contact.type === 'GROUP'
-                      const rawParticipants = Array.isArray(contact.participants) ? contact.participants : []
-                      const normalizedParticipants = rawParticipants.map((p) => {
-                        const pId = p.userId?._id || p._id
-                        const pName = p.userId?.name || p.name || 'U'
-                        const pAvatar = p.userId?.avatarUrl || p.avatarUrl || ''
-                        return {
-                          _id: pId,
-                          name: pName,
-                          avatarUrl: pAvatar
-                        }
-                      }).filter(p => p._id)
-                      const groupMembersForAvatar = isGroup
-                        ? (() => {
-                          const myId = String(user?._id || '')
-                          const others = normalizedParticipants.filter(p => String(p._id) !== myId)
-                          const me = normalizedParticipants.find(p => String(p._id) === myId)
-                          const source = [...others]
-                          if (source.length < 4 && me) {
-                            source.push(me)
-                          }
-                          if (source.length === 0) {
-                            return normalizedParticipants.slice(0, 4)
-                          }
-                          return source.slice(0, 4)
-                        })()
-                        : []
-                      const groupMemberCount = normalizedParticipants.length || groupMembersForAvatar.length
-                      const showGroupCountBadge = isGroup && groupMemberCount > 4
-                      const groupAvatarItems = isGroup
-                        ? (() => {
-                          const visibleItems = showGroupCountBadge
-                            ? groupMembersForAvatar.slice(0, 3)
-                            : groupMembersForAvatar.slice(0, 4)
-                          return visibleItems.length > 0
-                            ? visibleItems
-                            : [{ _id: contact._id || displayName, name: displayName || 'G', avatarUrl: contact.avatarUrl || '' }]
-                        })()
-                        : []
-                      const groupAvatarStackCount = showGroupCountBadge ? 4 : groupAvatarItems.length
-                      const userStatus = !isGroup && userId ? onlineStatus[String(userId)] : null
-                      const isOnline = userStatus?.status === 'online'
-                      const isConversation = !!contact.type || !!contact.participantId
-                      const lastTime = isConversation
-                        ? (contact.lastMessageAt || contact.lastMessage?.createdAt)
-                        : null
-                      const lastTimeText = lastTime ? formatRelative(lastTime) : ''
-                      const unread = isConversation && contact.unreadCounts && user?._id
-                        ? (contact.unreadCounts[String(user._id)] || 0)
-                        : 0
-                      const unreadText = unread > 99 ? '99+' : String(unread)
-
-                      return (
-                        <div
-                          key={contact._id || contact.participantId}
-                          className={`contact-item ${selectedContact?._id === contact._id ? 'active' : ''}`}
-                          onClick={() => handleContactClick(contact)}
-                        >
-                          <div
-                            className="avatar-wrapper"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              if (!isGroup && userId) {
-                                openUserPopup(userId)
-                              }
-                            }}
-                            style={{ cursor: !isGroup && userId ? 'pointer' : 'default' }}
-                          >
-                            <div className={`avatar ${isGroup ? 'avatar-group-stack' : ''}`}>
-                              {isGroup ? (
-                                <div className={`group-avatar-stack count-${groupAvatarStackCount}`}>
-                                  {groupAvatarItems.map((member, index) => (
-                                    <div className={`group-stack-item pos-${index + 1}`} key={member._id}>
-                                      {member.avatarUrl ? (
-                                        <img src={member.avatarUrl} alt={member.name} />
-                                      ) : (
-                                        <span>{(member.name || 'G').charAt(0).toUpperCase()}</span>
-                                      )}
-                                    </div>
-                                  ))}
-                                  {showGroupCountBadge && (
-                                    <span className="group-stack-count">{groupMemberCount}</span>
-                                  )}
-                                </div>
-                              ) : avatarUrl ? (
-                                <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
-                              ) : (
-                                displayName.charAt(0).toUpperCase()
-                              )}
-                            </div>
-                            {!isGroup && userId && (
-                              <span className={`status-indicator ${isOnline ? 'online' : 'offline'}`}></span>
-                            )}
-                          </div>
-                          <div className="contact-info">
-                            <div className="contact-title-row">
-                              <span className="name">
-                                {displayName}
-                              </span>
-                              {(lastTimeText || unread > 0) && (
-                                <div className="contact-meta-right">
-                                  {lastTimeText && (
-                                    <span className="contact-time">
-                                      {lastTimeText}
-                                    </span>
-                                  )}
-                                  {unread > 0 && (
-                                    <span className="unread-badge">
-                                      {unreadText}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                            <span className="last-message">
-                              {contact.lastMessage?.isRecalled
-                                ? 'Tin nhắn đã được thu hồi'
-                                : (contact.lastMessage?.content ||
-                                  (!isConversation ? (contact.email || '') : 'Không có tin nhắn'))}
-                            </span>
-                          </div>
-                        </div>
-                      )
-                    })
-                )}
-              </>
-            ) : (
-              <div className="contacts-panel-empty">
-                <p>Chọn một option từ thanh bên để bắt đầu</p>
-              </div>
-            )}
-          </div>
-        )}
+        <ContactsPanel
+          currentView={currentView}
+          searchTerm={searchTerm}
+          onSearchTermChange={setSearchTerm}
+          onOpenAddFriendModal={() => setShowAddFriendModal(true)}
+          onOpenCreateGroupModal={() => setShowCreateGroupModal(true)}
+          onOpenJoinGroupModal={() => {
+            setShowJoinGroupModal(true)
+            setJoinGroupCode('')
+          }}
+          error={error}
+          friendsView={friendsView}
+          friendRequestCount={friendRequests.length}
+          onChangeFriendsView={setFriendsView}
+          onLoadFriendRequests={loadFriendRequests}
+          loading={loading}
+          filteredContacts={filteredContacts}
+          selectedContact={selectedContact}
+          onContactClick={handleContactClick}
+          onOpenUserPopup={openUserPopup}
+          currentUser={user}
+          onlineStatus={onlineStatus}
+          formatRelative={formatRelative}
+        />
 
         {renderMainArea()}
 
-        {confirmPopup.open && (
-          <div className="profile-modal" onClick={() => closeConfirmPopup(false)}>
-            <div className="confirm-popup" onClick={(e) => e.stopPropagation()}>
-              <h3>{confirmPopup.title}</h3>
-              <p>{confirmPopup.message}</p>
-              <div className="confirm-popup-actions">
-                <button
-                  type="button"
-                  className="confirm-btn-secondary"
-                  onClick={() => closeConfirmPopup(false)}
-                >
-                  {confirmPopup.cancelText}
-                </button>
-                <button
-                  type="button"
-                  className={`confirm-btn-primary ${confirmPopup.danger ? 'danger' : ''}`}
-                  onClick={() => closeConfirmPopup(true)}
-                >
-                  {confirmPopup.confirmText}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        <ConfirmPopup popup={confirmPopup} onClose={closeConfirmPopup} />
 
-        {/* User Profile Modal */}
-        {showUserProfile && (
-          <div className="profile-modal" onClick={() => setShowUserProfile(false)}>
-            <div className="profile-content" onClick={(e) => e.stopPropagation()}>
-              <div className="profile-header">
-                <h3>Hồ sơ người dùng</h3>
-                <button
-                  className="close-btn"
-                  onClick={() => setShowUserProfile(false)}
-                >
-                  <MdClose />
-                </button>
-              </div>
-              {error && <div className="error-message" style={{ padding: '0 20px', color: 'red', fontSize: '13px' }}>{error}</div>}
+        <UserProfileModal
+          open={showUserProfile}
+          onClose={() => setShowUserProfile(false)}
+          error={error}
+          user={user}
+          isEditingProfile={isEditingProfile}
+          profileForm={profileForm}
+          onProfileChange={handleProfileChange}
+          onStartEdit={startEditProfile}
+          onSaveProfile={saveProfile}
+          onCancelEdit={() => setIsEditingProfile(false)}
+          onBannerClick={handleBannerClick}
+          bannerInputRef={bannerInputRef}
+          onBannerUpload={handleBannerUpload}
+          onAvatarClick={handleAvatarClick}
+          avatarInputRef={avatarInputRef}
+          onAvatarUpload={handleAvatarUpload}
+          formatDate={formatDate}
+        />
+      </div>
 
-              <div
-                className="profile-banner"
-                onClick={handleBannerClick}
-                title="Click để đổi banner"
-              >
-                {user?.bannerUrl ? (
-                  <img src={user.bannerUrl} alt="banner" />
-                ) : (
-                  <span>Banner</span>
-                )}
-              </div>
-              <input
-                type="file"
-                accept="image/*"
-                ref={bannerInputRef}
-                style={{ display: 'none' }}
-                onChange={handleBannerUpload}
-              />
+      <UserInfoModal user={popupUser} onClose={closePopup} formatDate={formatDate} />
 
-              <div className="profile-body">
-                <div className="profile-avatar-wrapper">
-                  <div
-                    className="profile-avatar-large"
-                    onClick={handleAvatarClick}
-                    title="Click để đổi avatar"
-                  >
-                    {user?.avatarUrl ? (
-                      <img src={user.avatarUrl} alt="avatar" />
-                    ) : (
-                      (user?.name || 'U').charAt(0).toUpperCase()
-                    )}
-                  </div>
-                </div>
-                <input
-                  type="file"
-                  accept="image/*"
-                  ref={avatarInputRef}
-                  style={{ display: 'none' }}
-                  onChange={handleAvatarUpload}
-                />
+      <AddFriendModal
+        open={showAddFriendModal}
+        onClose={resetAddFriendModal}
+        searchEmail={searchEmail}
+        onSearchEmailChange={setSearchEmail}
+        onSearchUser={handleSearchUser}
+        searchLoading={searchLoading}
+        error={error}
+        searchResults={searchResults}
+        friends={friends}
+        sentRequests={sentRequests}
+        friendRequests={friendRequests}
+        onAcceptRequest={handleAcceptRequest}
+        onSendRequestFromModal={handleSendRequestFromModal}
+      />
 
-                <div className="profile-info">
-                  {isEditingProfile ? (
-                    <>
-                      <div className="form-group">
-                        <label>Họ tên</label>
-                        <input
-                          name="name"
-                          value={profileForm.name}
-                          onChange={handleProfileChange}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label>Ngày sinh</label>
-                        <input
-                          type="date"
-                          name="dateOfBirth"
-                          value={profileForm.dateOfBirth}
-                          onChange={handleProfileChange}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label>Giới tính</label>
-                        <input
-                          name="gender"
-                          value={profileForm.gender}
-                          onChange={handleProfileChange}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label>BIO</label>
-                        <textarea
-                          name="bio"
-                          value={profileForm.bio}
-                          onChange={handleProfileChange}
-                        />
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      {/* ID được ẩn theo yêu cầu */}
-                      <p>
-                        <strong>Tên:</strong> {user?.name || 'Không có tên'}
-                      </p>
-                      <p>
-                        <strong>Email:</strong> {user?.email || 'Không có email'}
-                      </p>
-                      <p>
-                        <strong>Ngày sinh:</strong> {formatDate(user?.dateOfBirth) || 'dd/mm/yyyy'}
-                      </p>
-                      <p>
-                        <strong>Giới tính:</strong> {user?.gender || 'Không có'}
-                      </p>
-                      <p>
-                        <strong>BIO:</strong> {user?.bio || ''}
-                      </p>
-                    </>
-                  )}
-                  {!isEditingProfile && (
-                    <button className="btn-edit" onClick={startEditProfile}>
-                      <MdEdit />
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div className="profile-footer">
-                {isEditingProfile ? (
-                  <>
-                    <button className="btn" onClick={saveProfile}>
-                      Cập nhật
-                    </button>
-                    <button
-                      className="btn btn-cancel"
-                      onClick={() => setIsEditingProfile(false)}
-                    >
-                      Quay lại
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      className="btn btn-cancel"
-                      onClick={() => setShowUserProfile(false)}
-                    >
-                      Đóng
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>  {/* end home-container */}
-
-      {/* popup when clicking on another user's avatar in chat */}
-      {popupUser && (
-        <div className="profile-modal" onClick={closePopup}>
-          <div className="profile-content" onClick={e => e.stopPropagation()}>
-            <div className="profile-header">
-              <h3>Hồ sơ người dùng</h3>
-              <button
-                className="close-btn"
-                onClick={closePopup}
-              >
-                <MdClose />
-              </button>
-            </div>
-
-            <div
-              className="profile-banner"
-              title="Banner"
-            >
-              {popupUser?.bannerUrl ? (
-                <img src={popupUser.bannerUrl} alt="banner" />
-              ) : (
-                <span>Banner</span>
-              )}
-            </div>
-
-            <div className="profile-body">
-              <div className="profile-avatar-wrapper">
-                <div
-                  className="profile-avatar-large"
-                  title="Avatar"
-                >
-                  {popupUser?.avatarUrl ? (
-                    <img src={popupUser.avatarUrl} alt="avatar" />
-                  ) : (
-                    (popupUser?.name || 'U').charAt(0).toUpperCase()
-                  )}
-                </div>
-              </div>
-
-              <div className="profile-info">
-                <p>
-                  <strong>Tên:</strong> {popupUser?.name || 'Không có tên'}
-                </p>
-                <p>
-                  <strong>Email:</strong> {popupUser?.email || 'Không có email'}
-                </p>
-                <p>
-                  <strong>Ngày sinh:</strong> {formatDate(popupUser?.dateOfBirth) || 'dd/mm/yyyy'}
-                </p>
-                <p>
-                  <strong>Giới tính:</strong> {popupUser?.gender || 'Không có'}
-                </p>
-                <p>
-                  <strong>BIO:</strong> {popupUser?.bio || ''}
-                </p>
-              </div>
-            </div>
-            <div className="profile-footer">
-              <button
-                className="btn btn-cancel"
-                onClick={closePopup}
-              >
-                Đóng
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add Friend Modal */}
-      {showAddFriendModal && (
-        <div className="profile-modal" onClick={resetAddFriendModal}>
-          <div className="add-friend-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="profile-header">
-              <h3>Thêm bạn</h3>
-              <button className="close-btn" onClick={resetAddFriendModal}><MdClose /></button>
-            </div>
-            <div className="add-friend-body">
-              <div className="add-friend-search-row">
-                <input
-                  type="text"
-                  className="add-friend-input"
-                  placeholder="Nhập email..."
-                  value={searchEmail}
-                  onChange={(e) => setSearchEmail(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSearchUser()}
-                />
-                <button
-                  className="add-friend-search-btn"
-                  onClick={handleSearchUser}
-                  disabled={searchLoading}
-                >
-                  {searchLoading ? 'Đang tìm...' : 'Tìm kiếm'}
-                </button>
-              </div>
-              {error && <div className="error-message" style={{ padding: '4px 0', color: 'red', fontSize: 13 }}>{error}</div>}
-              <div className="add-friend-results-label">Kết quả gần nhất</div>
-              {searchResults.length === 0 ? (
-                <div className="add-friend-empty">
-                  <p>Chưa có kết quả</p>
-                  <button className="add-friend-search-btn-ghost" onClick={handleSearchUser}>Tìm kiếm</button>
-                </div>
-              ) : (
-                searchResults.map(u => (
-                  <div key={u._id} className="add-friend-result-item">
-                    <div className="add-friend-avatar">
-                      {u.avatarUrl ? <img src={u.avatarUrl} alt={u.name} /> : (u.name?.charAt(0).toUpperCase() || 'U')}
-                    </div>
-                    <div className="add-friend-info">
-                      <span className="add-friend-name">{u.name}</span>
-                      <span className="add-friend-email">{u.email}</span>
-                    </div>
-                    <div className="add-friend-action">
-                      {u.isSelf ? (
-                        <span className="add-friend-tag">Bạn</span>
-                      ) : friends.some(f => String(f._id) === String(u._id)) ? (
-                        <span className="add-friend-tag">Bạn bè</span>
-                      ) : sentRequests.some(r => String(r.toUserId?._id || r.toUserId) === String(u._id)) ? (
-                        <span className="add-friend-tag">Đã gửi</span>
-                      ) : friendRequests.some(r => String(r.fromUserId?._id || r.fromUserId) === String(u._id)) ? (
-                        <button className="fr-btn-accept" onClick={() => handleAcceptRequest(u._id)}>Đồng ý</button>
-                      ) : (
-                        <button className="fr-btn-accept" onClick={() => handleSendRequestFromModal(u._id, u.name)}>Kết bạn</button>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Send Request Confirmation Modal */}
-      {showSendRequestModal && selectedUserToAdd && (
-        <div className="profile-modal" onClick={() => setShowSendRequestModal(false)}>
-          <div className="add-friend-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="profile-header">
-              <h3>Gửi lời mời kết bạn</h3>
-              <button className="close-btn" onClick={() => setShowSendRequestModal(false)}><MdClose /></button>
-            </div>
-            <div className="add-friend-body">
-              <p style={{ marginBottom: 8 }}>Gửi lời mời đến <strong>{selectedUserToAdd.name}</strong></p>
-              <textarea
-                className="add-friend-input"
-                style={{ resize: 'none', height: 80, width: '100%', boxSizing: 'border-box' }}
-                value={requestMessage}
-                onChange={(e) => setRequestMessage(e.target.value)}
-              />
-              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                <button className="btn btn-cancel" style={{ flex: 1 }} onClick={() => setShowSendRequestModal(false)}>Hủy</button>
-                <button className="fr-btn-accept" style={{ flex: 1 }} onClick={confirmSendRequest}>Gửi</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <SendRequestModal
+        open={showSendRequestModal}
+        selectedUser={selectedUserToAdd}
+        requestMessage={requestMessage}
+        onMessageChange={setRequestMessage}
+        onClose={() => setShowSendRequestModal(false)}
+        onConfirm={confirmSendRequest}
+      />
 
       {showChangePassword && (
         <div className="profile-modal" onClick={() => setShowChangePassword(false)}>
@@ -3118,415 +1899,49 @@ const Home = () => {
         </div>
       )}
 
-      {showAddMembersModal && (
-        <div className="profile-modal" onClick={() => setShowAddMembersModal(false)}>
-          <div className="profile-popup" style={{ maxHeight: '90vh', width: '480px', maxWidth: '95vw', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
-            <div className="profile-header">
-              <h2>Thêm thành viên vào nhóm</h2>
-              <MdClose className="close-icon" onClick={() => setShowAddMembersModal(false)} />
-            </div>
-            <div className="profile-content" style={{ padding: '20px', overflowY: 'auto', flex: 1, width: '100%', maxWidth: 'none', boxSizing: 'border-box', borderRadius: 0, boxShadow: 'none' }}>
-              {(() => {
-                const inGroupIds = new Set((selectedContact?.participants || []).map(p => String(p.userId?._id || p._id)))
-                const candidates = friends.filter(f => !inGroupIds.has(String(f._id)))
-
-                if (candidates.length === 0) {
-                  return <p style={{ color: '#666' }}>Không còn bạn bè nào để thêm vào nhóm.</p>
-                }
-
-                return (
-                  <div style={{ border: '1px solid #ddd', borderRadius: '8px', maxHeight: '340px', overflowY: 'auto', padding: '10px' }}>
-                    {candidates.map(friend => (
-                      <div
-                        key={friend._id}
-                        style={{ display: 'flex', alignItems: 'center', padding: '10px', borderBottom: '1px solid #f0f0f0', cursor: 'pointer' }}
-                        onClick={() => {
-                          setSelectedMembersToAdd(prev =>
-                            prev.includes(friend._id)
-                              ? prev.filter(id => id !== friend._id)
-                              : [...prev, friend._id]
-                          )
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedMembersToAdd.includes(friend._id)}
-                          onChange={() => { }}
-                          style={{ marginRight: '10px', cursor: 'pointer' }}
-                        />
-                        <div style={{ width: '38px', height: '38px', borderRadius: '50%', backgroundColor: '#003399', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', marginRight: '10px', flexShrink: 0, overflow: 'hidden' }}>
-                          {friend.avatarUrl ? (
-                            <img src={friend.avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                          ) : (
-                            friend.name?.charAt(0).toUpperCase() || 'U'
-                          )}
-                        </div>
-                        <span>{friend.name}</span>
-                      </div>
-                    ))}
-                  </div>
-                )
-              })()}
-
-              <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-                <button
-                  onClick={handleAddMembersToGroup}
-                  disabled={groupActionLoading}
-                  style={{ flex: 1, padding: '10px 20px', backgroundColor: '#003399', color: 'white', border: 'none', borderRadius: '8px', cursor: groupActionLoading ? 'not-allowed' : 'pointer', fontWeight: 'bold', fontSize: '14px', opacity: groupActionLoading ? 0.7 : 1 }}
-                >
-                  {groupActionLoading ? 'Đang thêm...' : 'Thêm thành viên'}
-                </button>
-                <button
-                  onClick={() => setShowAddMembersModal(false)}
-                  style={{ flex: 1, padding: '10px 20px', backgroundColor: '#e8e8e8', color: '#333', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}
-                >
-                  Huỷ
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showTransferOwnerModal && (
-        <div className="profile-modal" onClick={() => setShowTransferOwnerModal(false)}>
-          <div className="profile-popup" style={{ maxWidth: '560px', width: '95vw' }} onClick={e => e.stopPropagation()}>
-            <div className="profile-header">
-              <h2>Chuyển quyền và rời nhóm</h2>
-              <MdClose className="close-icon" onClick={() => setShowTransferOwnerModal(false)} />
-            </div>
-            <div className="profile-content" style={{ padding: '24px', width: '100%', maxWidth: 'none', boxSizing: 'border-box', borderRadius: 0, boxShadow: 'none' }}>
-              <p style={{ margin: '0 0 12px', color: '#666', fontSize: '16px' }}>Chọn thành viên sẽ trở thành trưởng nhóm mới.</p>
-              <div style={{ border: '1px solid #ddd', borderRadius: '12px', maxHeight: '280px', overflowY: 'auto', padding: '8px 12px' }}>
-                {(selectedContact?.participants || [])
-                  .filter(p => String(p.userId?._id || p._id) !== String(user?._id))
-                  .map(p => {
-                    const userId = p.userId?._id || p._id
-                    const userName = p.userId?.name || p.name || 'User'
-                    return (
-                      <label key={userId} style={{ display: 'flex', alignItems: 'center', gap: '12px', minHeight: '56px', padding: '8px 6px', cursor: 'pointer', borderBottom: '1px solid #f0f0f0' }}>
-                        <input
-                          type="radio"
-                          name="transferOwner"
-                          value={userId}
-                          checked={String(transferTargetUserId) === String(userId)}
-                          onChange={() => setTransferTargetUserId(userId)}
-                        />
-                        <span style={{ fontSize: '16px', lineHeight: 1.1 }}>{userName}</span>
-                      </label>
-                    )
-                  })}
-              </div>
-              <div style={{ display: 'flex', gap: '12px', marginTop: '18px' }}>
-                <button
-                  onClick={handleTransferOwnerAndLeave}
-                  disabled={groupActionLoading || !transferTargetUserId}
-                  style={{ flex: 1, minHeight: '50px', padding: '0 16px', backgroundColor: '#003399', color: 'white', border: 'none', borderRadius: '12px', cursor: groupActionLoading || !transferTargetUserId ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: '16px', whiteSpace: 'nowrap', opacity: groupActionLoading || !transferTargetUserId ? 0.7 : 1 }}
-                >
-                  {groupActionLoading ? 'Đang xử lý...' : 'Chuyển quyền & Rời nhóm'}
-                </button>
-                <button
-                  onClick={() => setShowTransferOwnerModal(false)}
-                  style={{ flex: 1, minHeight: '50px', padding: '0 16px', backgroundColor: '#e8e8e8', color: '#333', border: 'none', borderRadius: '12px', cursor: 'pointer', fontWeight: 700, fontSize: '16px' }}
-                >
-                  Huỷ
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Rename Group Modal */}
-      {showRenameModal && (
-        <div className="profile-modal" onClick={() => setShowRenameModal(false)}>
-          <div className="profile-popup" style={{ maxWidth: '520px', width: '95vw' }} onClick={e => e.stopPropagation()}>
-            <div className="profile-header">
-              <h2>Đổi tên nhóm</h2>
-              <MdClose className="close-icon" onClick={() => setShowRenameModal(false)} />
-            </div>
-            <div className="profile-content" style={{ padding: '24px', width: '100%', maxWidth: 'none', boxSizing: 'border-box', borderRadius: 0, boxShadow: 'none' }}>
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Tên nhóm mới</label>
-                <input
-                  type="text"
-                  placeholder="Nhập tên nhóm mới"
-                  value={newGroupName}
-                  onChange={(e) => setNewGroupName(e.target.value)}
-                  autoFocus
-                  onKeyDown={(e) => e.key === 'Enter' && handleSubmitRename()}
-                  style={{
-                    width: '100%',
-                    padding: '10px',
-                    border: '1px solid #ddd',
-                    borderRadius: '8px',
-                    fontSize: '14px',
-                    boxSizing: 'border-box'
-                  }}
-                />
-              </div>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button
-                  onClick={handleSubmitRename}
-                  style={{
-                    flex: 1,
-                    padding: '10px 20px',
-                    backgroundColor: '#003399',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontWeight: 'bold'
-                  }}
-                >
-                  Lưu
-                </button>
-                <button
-                  onClick={() => setShowRenameModal(false)}
-                  style={{
-                    flex: 1,
-                    padding: '10px 20px',
-                    backgroundColor: '#e8e8e8',
-                    color: '#333',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontWeight: 'bold'
-                  }}
-                >
-                  Huỷ
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Create Group Modal */}
-      {showCreateGroupModal && (
-        <div className="profile-modal" onClick={() => setShowCreateGroupModal(false)}>
-          <div className="profile-popup" style={{ maxHeight: '90vh', width: '480px', maxWidth: '95vw', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
-            <div className="profile-header">
-              <h2>Tạo nhóm chat</h2>
-              <MdClose className="close-icon" onClick={() => setShowCreateGroupModal(false)} />
-            </div>
-            <div className="profile-content" style={{ padding: '20px', overflowY: 'auto', flex: 1, width: '100%', maxWidth: 'none', boxSizing: 'border-box', borderRadius: 0, boxShadow: 'none' }}>
-              <div style={{ marginBottom: '15px' }}>
-                <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Tên nhóm</label>
-                <input
-                  type="text"
-                  placeholder="Nhập tên nhóm"
-                  value={groupName}
-                  onChange={(e) => setGroupName(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px',
-                    border: '1px solid #ddd',
-                    borderRadius: '8px',
-                    fontSize: '14px',
-                    boxSizing: 'border-box'
-                  }}
-                />
-              </div>
-
-              <div style={{ marginBottom: '15px' }}>
-                <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Chọn bạn bè ({selectedFriendsForGroup.length})</label>
-                <div style={{
-                  border: '1px solid #ddd',
-                  borderRadius: '8px',
-                  maxHeight: '300px',
-                  overflowY: 'auto',
-                  padding: '10px'
-                }}>
-                  {friends.length === 0 ? (
-                    <p style={{ color: '#999' }}>Bạn chưa có bạn bè. Vui lòng thêm bạn bè trước.</p>
-                  ) : (
-                    friends.map(friend => (
-                      <div
-                        key={friend._id}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          padding: '10px',
-                          borderBottom: '1px solid #f0f0f0',
-                          cursor: 'pointer'
-                        }}
-                        onClick={() => {
-                          setSelectedFriendsForGroup(prev =>
-                            prev.includes(friend._id)
-                              ? prev.filter(id => id !== friend._id)
-                              : [...prev, friend._id]
-                          )
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedFriendsForGroup.includes(friend._id)}
-                          onChange={() => { }}
-                          style={{ marginRight: '10px', cursor: 'pointer' }}
-                        />
-                        <div style={{
-                          width: '40px',
-                          height: '40px',
-                          borderRadius: '50%',
-                          backgroundColor: '#003399',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: 'white',
-                          marginRight: '10px',
-                          flexShrink: 0,
-                          overflow: 'hidden'
-                        }}>
-                          {friend.avatarUrl ? (
-                            <img src={friend.avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                          ) : (
-                            friend.name.charAt(0).toUpperCase()
-                          )}
-                        </div>
-                        <span>{friend.name}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button
-                  onClick={handleCreateGroup}
-                  style={{
-                    flex: 1,
-                    padding: '10px 20px',
-                    backgroundColor: '#003399',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontWeight: 'bold',
-                    fontSize: '14px'
-                  }}
-                >
-                  Tạo nhóm
-                </button>
-                <button
-                  onClick={() => setShowCreateGroupModal(false)}
-                  style={{
-                    flex: 1,
-                    padding: '10px 20px',
-                    backgroundColor: '#e8e8e8',
-                    color: '#333',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontWeight: 'bold',
-                    fontSize: '14px'
-                  }}
-                >
-                  Huỷ
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showJoinGroupModal && (
-        <div className="profile-modal" onClick={() => setShowJoinGroupModal(false)}>
-          <div className="profile-popup" style={{ width: '420px', maxWidth: '95vw' }} onClick={e => e.stopPropagation()}>
-            <div className="profile-header">
-              <h2>Tham gia nhóm bằng mã</h2>
-              <MdClose className="close-icon" onClick={() => setShowJoinGroupModal(false)} />
-            </div>
-            <div className="profile-content" style={{ padding: '20px', width: '100%', maxWidth: 'none', boxSizing: 'border-box', borderRadius: 0, boxShadow: 'none' }}>
-              <p style={{ color: '#555', marginBottom: '14px', fontSize: '14px' }}>Nhập mã mời để tham gia vào nhóm chat.</p>
-              <input
-                type="text"
-                placeholder="Nhập mã nhóm..."
-                value={joinGroupCode}
-                onChange={e => setJoinGroupCode(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && !joinGroupLoading && joinGroupCode.trim() && (async () => {
-                  setJoinGroupLoading(true)
-                  try {
-                    const conv = await conversationService.joinByInvite(joinGroupCode.trim())
-                    setShowJoinGroupModal(false)
-                    await loadConversations()
-                    if (conv?.conversation) setSelectedContact(conv.conversation)
-                  } catch (err) {
-                    setError(err.message || 'Mã nhóm không hợp lệ hoặc đã hết hạn.')
-                  } finally {
-                    setJoinGroupLoading(false)
-                  }
-                })()}
-                style={{ width: '100%', padding: '10px 12px', border: '1px solid #ddd', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box', marginBottom: '16px' }}
-                autoFocus
-              />
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button
-                  onClick={async () => {
-                    if (!joinGroupCode.trim() || joinGroupLoading) return
-                    setJoinGroupLoading(true)
-                    try {
-                      const conv = await conversationService.joinByInvite(joinGroupCode.trim())
-                      setShowJoinGroupModal(false)
-                      await loadConversations()
-                      if (conv?.conversation) setSelectedContact(conv.conversation)
-                    } catch (err) {
-                      setError(err.message || 'Mã nhóm không hợp lệ hoặc đã hết hạn.')
-                    } finally {
-                      setJoinGroupLoading(false)
-                    }
-                  }}
-                  disabled={!joinGroupCode.trim() || joinGroupLoading}
-                  style={{ flex: 1, padding: '10px', backgroundColor: joinGroupCode.trim() && !joinGroupLoading ? '#003399' : '#b0b8d1', color: 'white', border: 'none', borderRadius: '8px', cursor: joinGroupCode.trim() && !joinGroupLoading ? 'pointer' : 'not-allowed', fontWeight: 'bold', fontSize: '14px' }}
-                >
-                  {joinGroupLoading ? 'Đang tham gia...' : 'Tham gia'}
-                </button>
-                <button
-                  onClick={() => setShowJoinGroupModal(false)}
-                  style={{ flex: 1, padding: '10px', backgroundColor: '#e8e8e8', color: '#333', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}
-                >
-                  Huỷ
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showInviteCodeModal && (
-        <div className="profile-modal" onClick={() => setShowInviteCodeModal(false)}>
-          <div className="profile-popup" style={{ width: '460px', maxWidth: '95vw' }} onClick={e => e.stopPropagation()}>
-            <div className="profile-header">
-              <h2>Link mời nhóm</h2>
-              <MdClose className="close-icon" onClick={() => setShowInviteCodeModal(false)} />
-            </div>
-            <div className="profile-content" style={{ padding: '18px', width: '100%', maxWidth: 'none', boxSizing: 'border-box', borderRadius: 0, boxShadow: 'none' }}>
-              <p style={{ margin: '0 0 14px', color: '#8a97a8', fontSize: '14px' }}>Chia sẻ mã này để ai cũng có thể tham gia nhóm</p>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#eff2f6', borderRadius: '10px', padding: '10px' }}>
-                <div style={{ flex: 1, fontSize: '22px', fontWeight: 700, letterSpacing: '1px', color: '#1f2a3d', wordBreak: 'break-all' }}>
-                  {inviteCode}
-                </div>
-                <button
-                  onClick={handleCopyInviteCode}
-                  style={{ minWidth: '98px', height: '42px', border: 'none', borderRadius: '10px', background: copyInviteSuccess ? '#18a957' : '#2f67d8', color: '#fff', fontSize: '15px', fontWeight: 700, cursor: 'pointer' }}
-                >
-                  {copyInviteSuccess ? 'Đã chép' : 'Sao chép'}
-                </button>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '14px' }}>
-                <button
-                  onClick={() => setShowInviteCodeModal(false)}
-                  style={{ width: '94px', height: '40px', border: '1px solid #d7dee9', borderRadius: '10px', background: '#f7f9fc', color: '#7d8796', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}
-                >
-                  Đóng
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <GroupModals
+        showAddMembersModal={showAddMembersModal}
+        setShowAddMembersModal={setShowAddMembersModal}
+        selectedContact={selectedContact}
+        friends={friends}
+        selectedMembersToAdd={selectedMembersToAdd}
+        setSelectedMembersToAdd={setSelectedMembersToAdd}
+        handleAddMembersToGroup={handleAddMembersToGroup}
+        groupActionLoading={groupActionLoading}
+        showTransferOwnerModal={showTransferOwnerModal}
+        setShowTransferOwnerModal={setShowTransferOwnerModal}
+        user={user}
+        transferTargetUserId={transferTargetUserId}
+        setTransferTargetUserId={setTransferTargetUserId}
+        handleTransferOwnerAndLeave={handleTransferOwnerAndLeave}
+        showRenameModal={showRenameModal}
+        setShowRenameModal={setShowRenameModal}
+        newGroupName={newGroupName}
+        setNewGroupName={setNewGroupName}
+        handleSubmitRename={handleSubmitRename}
+        showCreateGroupModal={showCreateGroupModal}
+        setShowCreateGroupModal={setShowCreateGroupModal}
+        groupName={groupName}
+        setGroupName={setGroupName}
+        selectedFriendsForGroup={selectedFriendsForGroup}
+        setSelectedFriendsForGroup={setSelectedFriendsForGroup}
+        handleCreateGroup={handleCreateGroup}
+        showJoinGroupModal={showJoinGroupModal}
+        setShowJoinGroupModal={setShowJoinGroupModal}
+        joinGroupCode={joinGroupCode}
+        setJoinGroupCode={setJoinGroupCode}
+        joinGroupLoading={joinGroupLoading}
+        setJoinGroupLoading={setJoinGroupLoading}
+        conversationService={conversationService}
+        loadConversations={loadConversations}
+        setSelectedContact={setSelectedContact}
+        setError={setError}
+        showInviteCodeModal={showInviteCodeModal}
+        setShowInviteCodeModal={setShowInviteCodeModal}
+        inviteCode={inviteCode}
+        copyInviteSuccess={copyInviteSuccess}
+        handleCopyInviteCode={handleCopyInviteCode}
+      />
 
 
     </>
