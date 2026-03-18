@@ -1298,7 +1298,7 @@
 }
 
 .settings-item button {
-  margin-left: 0;
+  margin: 0;
 }
 
 .settings-item:last-child {
@@ -1317,7 +1317,6 @@
 
 .settings-item button {
   width: auto;
-  margin-top: 0;
   padding: 8px 16px;
   font-size: 14px;
   border-radius: 4px;
@@ -2047,6 +2046,20 @@
   background: #e84335;
 }
 
+.info-buttons {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.info-buttons .btn-block,
+.info-buttons .btn-unfriend {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
 .group-actions {
   display: flex;
   justify-content: center;
@@ -2496,14 +2509,14 @@
 .profile-footer {
   padding: 15px 20px;
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
+  align-items: center;
   gap: 12px;
   border-top: 1px solid #e0e0e0;
 }
 
 .profile-footer .btn,
 .profile-footer .btn-cancel {
-  min-width: 90px;
   padding: 10px 14px;
   font-size: 15px;
   font-weight: 600;
@@ -2516,6 +2529,7 @@
 .profile-footer .btn {
   background: #003399;
   color: #fff;
+  min-width: 90px;
 }
 
 .profile-footer .btn:hover {
@@ -2525,10 +2539,67 @@
 .profile-footer .btn-cancel {
   background: #f44336;
   color: #fff;
+  min-width: 80px;
 }
 
 .profile-footer .btn-cancel:hover {
   background: #c62828;
+}
+
+.friend-actions {
+  display: flex;
+  gap: 10px;
+  flex: 0 1 auto;
+}
+
+.friend-actions .btn,
+.friend-actions .btn-danger,
+.friend-actions .btn-warning,
+.friend-actions .btn-cancel {
+  padding: 10px 14px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s;
+  min-width: 80px;
+}
+
+.friend-actions .btn {
+  background: #003399;
+  color: #fff;
+}
+
+.friend-actions .btn:hover {
+  background: #0028cc;
+}
+
+.friend-actions .btn-danger {
+  background: #f44336;
+  color: #fff;
+}
+
+.friend-actions .btn-danger:hover {
+  background: #c62828;
+}
+
+.friend-actions .btn-warning {
+  background: #ff9800;
+  color: #fff;
+}
+
+.friend-actions .btn-warning:hover {
+  background: #e68900;
+}
+
+.friend-actions .btn-cancel {
+  background: #999;
+  color: #fff;
+}
+
+.friend-actions .btn-cancel:hover {
+  background: #777;
 }
 
 .btn-edit {

@@ -1334,6 +1334,7 @@ const Home = () => {
           loadFriends()
         }
       }
+      toast.success('Đã chấp nhận yêu cầu kết bạn')
     } catch (err) {
       setError('Không thể chấp nhận yêu cầu kết bạn')
     }
@@ -1345,6 +1346,7 @@ const Home = () => {
       await friendService.declineFriendRequest(requestId)
       // Cập nhật local state ngay
       setFriendRequests(prev => prev.filter(r => String(r._id) !== String(requestId)))
+      toast.success('Đã từ chối yêu cầu kết bạn')
     } catch (err) {
       setError('Không thể từ chối yêu cầu kết bạn')
     }
@@ -1368,6 +1370,7 @@ const Home = () => {
       await friendService.cancelFriendRequest(requestId, toUserId)
       // Cập nhật local state ngay
       setSentRequests(prev => prev.filter(r => String(r._id) !== String(requestId)))
+      toast.success('Đã thu hồi lời mời kết bạn')
     } catch (err) {
       console.error('[Revoke] error:', err)
       setError('Không thể thu hồi lời mời kết bạn. Vui lòng thử lại.')
@@ -1470,6 +1473,7 @@ const Home = () => {
       if (selectedContact && selectedContact._id === userId) {
         setSelectedContact(null)
       }
+      toast.success('Đã hủy kết bạn')
     } catch (err) {
       setError('Không thể huỷ kết bạn')
     }
@@ -1815,7 +1819,20 @@ const Home = () => {
         />
       </div>
 
-      <UserInfoModal user={popupUser} onClose={closePopup} formatDate={formatDate} />
+      <UserInfoModal
+        user={popupUser}
+        onClose={closePopup}
+        formatDate={formatDate}
+        currentUserId={user?._id}
+        friends={friends}
+        sentRequests={sentRequests}
+        friendRequests={friendRequests}
+        onAddFriend={handleSendRequest}
+        onUnfriend={handleUnfriend}
+        onAcceptRequest={handleAcceptRequest}
+        onDeclineRequest={handleDeclineRequest}
+        onRevokeRequest={handleRevokeRequest}
+      />
 
       <AddFriendModal
         open={showAddFriendModal}

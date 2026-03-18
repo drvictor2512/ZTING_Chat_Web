@@ -1,8 +1,70 @@
 import React from 'react'
 import { MdClose } from 'react-icons/md'
 
-const UserInfoModal = ({ user, onClose, formatDate }) => {
+const UserInfoModal = ({
+    user,
+    onClose,
+    formatDate,
+    currentUserId,
+    friends = [],
+    sentRequests = [],
+    friendRequests = [],
+    onAddFriend,
+    onUnfriend,
+    onAcceptRequest,
+    onDeclineRequest,
+    onRevokeRequest
+}) => {
     if (!user) return null
+
+    // Check relationship status
+    const isSelf = String(currentUserId) === String(user._id)
+    const isFriend = !isSelf && friends.some(f => String(f._id) === String(user._id))
+    
+    const sentRequest = !isSelf && sentRequests.find(r => {
+        const toId = r.toUserId?._id || r.toUserId
+        return String(toId) === String(user._id)
+    })
+    
+    const incomingRequest = !isSelf && friendRequests.find(r => {
+        const fromId = r.fromUserId?._id || r.fromUserId
+        return String(fromId) === String(user._id)
+    })
+
+    const handleAddClick = () => {
+        if (onAddFriend) {
+            onAddFriend(user._id)
+            onClose()
+        }
+    }
+
+    const handleUnfriendClick = () => {
+        if (onUnfriend) {
+            onUnfriend(user._id)
+            onClose()
+        }
+    }
+
+    const handleAcceptClick = () => {
+        if (onAcceptRequest && incomingRequest) {
+            onAcceptRequest(incomingRequest._id)
+            onClose()
+        }
+    }
+
+    const handleDeclineClick = () => {
+        if (onDeclineRequest && incomingRequest) {
+            onDeclineRequest(incomingRequest._id)
+            onClose()
+        }
+    }
+
+    const handleRevokeClick = () => {
+        if (onRevokeRequest && sentRequest) {
+            onRevokeRequest(sentRequest._id, user._id)
+            onClose()
+        }
+    }
 
     return (
         <div className="profile-modal" onClick={onClose}>
@@ -42,6 +104,22 @@ const UserInfoModal = ({ user, onClose, formatDate }) => {
                     </div>
                 </div>
                 <div className="profile-footer">
+                    {!isSelf && (
+                        <div className="friend-actions">
+                            {isFriend ? (
+                                <button className="btn btn-danger" onClick={handleUnfriendClick}>Hủy kết bạn</button>
+                            ) : sentRequest ? (
+                                <button className="btn btn-warning" onClick={handleRevokeClick}>Thu hồi</button>
+                            ) : incomingRequest ? (
+                                <>
+                                    <button className="btn" onClick={handleAcceptClick}>Chấp nhận</button>
+                                    <button className="btn btn-cancel" onClick={handleDeclineClick}>Từ chối</button>
+                                </>
+                            ) : (
+                                <button className="btn" onClick={handleAddClick}>Kết bạn</button>
+                            )}
+                        </div>
+                    )}
                     <button className="btn btn-cancel" onClick={onClose}>Đóng</button>
                 </div>
             </div>

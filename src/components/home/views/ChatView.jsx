@@ -193,27 +193,6 @@ const ChatView = ({
                                 </div>
                             </div>
                             <MdMenu className="info-toggle" onClick={() => setShowInfoPanel(v => !v)} title="Chi tiet" />
-                            {(() => {
-                                const contactId = selectedContact.participantId || selectedContact._id
-                                const isFriend = friends.some(f => f._id === contactId)
-                                sentRequests.some(r => {
-                                    const toId = r.toUserId?._id || r.toUserId
-                                    return toId === contactId
-                                })
-                                friendRequests.some(r => {
-                                    const fromId = r.fromUserId?._id || r.fromUserId
-                                    return fromId === contactId
-                                })
-                                return (
-                                    <>
-                                        {isFriend && (
-                                            <button className="btn-unfriend" onClick={() => handleUnfriend(contactId)}>
-                                                Hủy kết bạn
-                                            </button>
-                                        )}
-                                    </>
-                                )
-                            })()}
                         </div>
                         <div className="chat-messages">
                             {messages.length === 0 ? (
@@ -614,9 +593,20 @@ const ChatView = ({
                                                 <p className="info-status">{text}</p>
                                             ) : null
                                         })()}
-                                        <button className="btn-block" onClick={toggleBlock}>
-                                            {blockedUsers.includes(selectedContact.participantId) ? 'Bỏ chặn' : 'Chặn'}
-                                        </button>
+                                        <div className="info-buttons">
+                                            <button className="btn-block" onClick={toggleBlock}>
+                                                {blockedUsers.includes(selectedContact.participantId) ? 'Bỏ chặn' : 'Chặn'}
+                                            </button>
+                                            {(() => {
+                                                const contactId = selectedContact.participantId || selectedContact._id
+                                                const isFriend = friends.some(f => f._id === contactId)
+                                                return isFriend ? (
+                                                    <button className="btn-unfriend" onClick={() => handleUnfriend(contactId)}>
+                                                        Hủy kết bạn
+                                                    </button>
+                                                ) : null
+                                            })()}
+                                        </div>
                                     </div>
                                     <div className="info-body">
                                         <div className="info-section">
