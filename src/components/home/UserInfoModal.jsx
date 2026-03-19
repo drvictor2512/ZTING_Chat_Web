@@ -41,7 +41,6 @@ const UserInfoModal = ({
     const handleUnfriendClick = () => {
         if (onUnfriend) {
             onUnfriend(user._id)
-            onClose()
         }
     }
 

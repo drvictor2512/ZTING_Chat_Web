@@ -2035,7 +2035,7 @@
 .btn-block {
   padding: 6px 12px;
   font-size: 13px;
-  background: #ff4d4f;
+  background: #ff9800;
   color: #fff;
   border: none;
   border-radius: 4px;
@@ -2043,7 +2043,7 @@
 }
 
 .btn-block:hover {
-  background: #e84335;
+  background: #e68900;
 }
 
 .info-buttons {
@@ -2054,10 +2054,35 @@
 }
 
 .info-buttons .btn-block,
-.info-buttons .btn-unfriend {
+.info-buttons .btn-unfriend,
+.info-buttons .btn {
   flex: 1;
   padding: 8px 12px;
   font-size: 13px;
+}
+
+.info-buttons .btn-unfriend {
+  background: #f44336;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.info-buttons .btn-unfriend:hover {
+  background: #c62828;
+}
+
+.info-buttons .btn {
+  background: #ff9800;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.info-buttons .btn:hover {
+  background: #e68900;
 }
 
 .group-actions {
@@ -2576,12 +2601,12 @@
 }
 
 .friend-actions .btn-danger {
-  background: #f44336;
+  background: #ff9800;
   color: #fff;
 }
 
 .friend-actions .btn-danger:hover {
-  background: #c62828;
+  background: #e68900;
 }
 
 .friend-actions .btn-warning {
@@ -2594,12 +2619,12 @@
 }
 
 .friend-actions .btn-cancel {
-  background: #999;
+  background: #ff9800;
   color: #fff;
 }
 
 .friend-actions .btn-cancel:hover {
-  background: #777;
+  background: #e68900;
 }
 
 .btn-edit {
