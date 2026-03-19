@@ -56,11 +56,71 @@ const Home = () => {
   const messagesEndRef = useRef(null)
   const messageInputRef = useRef(null)
 
+  const normalizeUserId = (value) => {
+    if (!value) return ''
+    if (typeof value === 'string' || typeof value === 'number') return String(value)
+    if (typeof value !== 'object') return ''
+
+    const candidates = [
+      value._id,
+      value.id,
+      value.userId,
+      value.blockedUserId,
+      value.targetId,
+      value.user,
+      value.profile
+    ]
+
+    for (const item of candidates) {
+      if (!item) continue
+      const normalized = normalizeUserId(item)
+      if (normalized) return normalized
+    }
+
+    return ''
+  }
+
+  const normalizeBlockedUsers = (items = []) =>
+    items
+      .map(normalizeUserId)
+      .filter(Boolean)
+
+  const getDirectParticipantId = (contact) => {
+    if (!contact) return ''
+
+    const directId = normalizeUserId(contact.participantId)
+    if (directId) return directId
+
+    const participants = Array.isArray(contact.participants) ? contact.participants : []
+    const myId = normalizeUserId(user?._id)
+    const other = participants.find((p) => {
+      const pId = normalizeUserId(p?.userId || p?._id || p)
+      return pId && pId !== myId
+    })
+
+    return normalizeUserId(other?.userId || other?._id || other)
+  }
+
+  const isBlockedUser = (userId) => {
+    const targetId = normalizeUserId(userId)
+    if (!targetId) return false
+    return blockedUsers.some(id => normalizeUserId(id) === targetId)
+  }
+
   // load list of users blocked by current user
   const loadBlockedUsers = async () => {
     try {
       const res = await userService.getBlockedUsers()
-      setBlockedUsers(res.blocked || [])
+      const payload =
+        (Array.isArray(res) && res) ||
+        res?.blocked ||
+        res?.blockedUsers ||
+        res?.users ||
+        res?.data?.blocked ||
+        res?.data?.blockedUsers ||
+        res?.data?.users ||
+        []
+      setBlockedUsers(normalizeBlockedUsers(Array.isArray(payload) ? payload : []))
     } catch (err) {
       console.error('cannot load blocked users', err)
     }
@@ -94,6 +154,12 @@ const Home = () => {
   const [transferTargetUserId, setTransferTargetUserId] = useState('')
   const [groupActionLoading, setGroupActionLoading] = useState(false)
   const [friendsView, setFriendsView] = useState('friends-list')
+  const normalizedError = String(error || '').toLowerCase()
+  const shouldHideSidebarError =
+    normalizedError.includes('bị chặn bởi người này') ||
+    normalizedError.includes('đã chặn người này') ||
+    normalizedError.includes('bỏ chặn để gửi tin nhắn')
+  const sidebarError = shouldHideSidebarError ? '' : error
   const confirmResolverRef = useRef(null)
   const [confirmPopup, setConfirmPopup] = useState({
     open: false,
@@ -173,6 +239,11 @@ const Home = () => {
   // Listen for real-time messages
   useEffect(() => {
     const handleNewMessage = (newMsg) => {
+      // Filter out messages from blocked users for direct conversations
+      if (selectedContact?.type === 'DIRECT' && selectedContact?.participantId && isBlockedUser(newMsg.senderId)) {
+        return
+      }
+      
       // Only add message if it's from the current conversation
       if (selectedContact && String(newMsg.conversationId) === String(selectedContact._id)) {
         setMessages(prev => {
@@ -213,7 +284,7 @@ const Home = () => {
         socket.off('message_recalled', handleMessageRecalled)
       }
     }
-  }, [selectedContact])
+  }, [selectedContact, blockedUsers])
 
   // Listen for online/offline status
   useEffect(() => {
@@ -254,6 +325,41 @@ const Home = () => {
       if (socket) {
         socket.off('user_status', handleUserStatus)
         socket.off('online_users', handleOnlineUsers)
+      }
+    }
+  }, [])
+
+  // Listen for block/unblock events
+  useEffect(() => {
+    const handleUserBlocked = (data) => {
+      if (data?.userId) {
+        setBlockedUsers(prev => {
+          const userId = normalizeUserId(data.userId)
+          // Avoid duplicates
+          if (prev.some(id => normalizeUserId(id) === userId)) return prev
+          return [...prev, userId]
+        })
+      }
+    }
+
+    const handleUserUnblocked = (data) => {
+      if (data?.userId) {
+        setBlockedUsers(prev =>
+          prev.filter(id => normalizeUserId(id) !== normalizeUserId(data.userId))
+        )
+      }
+    }
+
+    const socket = socketService.getSocket()
+    if (socket) {
+      socket.on('user_blocked', handleUserBlocked)
+      socket.on('user_unblocked', handleUserUnblocked)
+    }
+
+    return () => {
+      if (socket) {
+        socket.off('user_blocked', handleUserBlocked)
+        socket.off('user_unblocked', handleUserUnblocked)
       }
     }
   }, [])
@@ -710,7 +816,14 @@ const Home = () => {
   const loadMessages = async (conversationId) => {
     try {
       const res = await conversationService.getMessages(conversationId)
-      setMessages(res.messages || [])
+      let msgs = res.messages || []
+      
+      // Filter out messages from blocked users (for direct conversations)
+      if (selectedContact?.type === 'DIRECT' && selectedContact?.participantId) {
+        msgs = msgs.filter(msg => !isBlockedUser(msg.senderId))
+      }
+      
+      setMessages(msgs)
     } catch (err) {
       console.error('Không thể tải tin nhắn', err)
     }
@@ -725,7 +838,7 @@ const Home = () => {
       setMessages([])
       setChatNotice('')
     }
-  }, [selectedContact, currentView])
+  }, [selectedContact, currentView, blockedUsers])
 
   // scroll to bottom when messages change
   useEffect(() => {
@@ -736,16 +849,31 @@ const Home = () => {
 
   // actions for info panel
   const toggleBlock = async () => {
-    if (!selectedContact || !selectedContact.participantId) return
+    if (!selectedContact) return
     try {
-      if (blockedUsers.includes(selectedContact.participantId)) {
-        await userService.unblockUser(selectedContact.participantId)
+      const targetUserId = getDirectParticipantId(selectedContact)
+      if (!targetUserId) return
+      const isCurrentlyBlocked = isBlockedUser(targetUserId)
+      
+      if (isCurrentlyBlocked) {
+        // Optimistically update UI before API call
+        setBlockedUsers(prev => prev.filter(id => normalizeUserId(id) !== targetUserId))
+        await userService.unblockUser(targetUserId)
+        toast.success(`Đã bỏ chặn ${selectedContact.participantName || selectedContact.name}`)
       } else {
-        await userService.blockUser(selectedContact.participantId)
+        // Optimistically update UI before API call
+        setBlockedUsers(prev => {
+          if (prev.some(id => normalizeUserId(id) === targetUserId)) return prev
+          return [...prev, targetUserId]
+        })
+        await userService.blockUser(targetUserId)
+        toast.success(`Đã chặn ${selectedContact.participantName || selectedContact.name}`)
       }
-      await loadBlockedUsers()
     } catch (err) {
       console.error('block/unblock failed', err)
+      toast.error('Không thể thực hiện hành động này')
+      // Reload to revert optimistic update on error
+      await loadBlockedUsers()
     }
   }
 
@@ -1167,6 +1295,12 @@ const Home = () => {
       return
     }
 
+    // Guard: if recipient is blocked, prevent sending message
+    if (selectedContact?.type === 'DIRECT' && isBlockedUser(getDirectParticipantId(selectedContact))) {
+      toast.error('Không thể gửi tin nhắn đến người dùng đã bị chặn')
+      return
+    }
+
     try {
       let activeConv = selectedContact
 
@@ -1559,6 +1693,12 @@ const Home = () => {
   // helper: status text cho 1 user (online/offline + lần cuối online)
   const getUserStatusText = (userId) => {
     if (!userId) return ''
+    
+    // Hide status for blocked users
+    if (isBlockedUser(userId)) {
+      return ''
+    }
+    
     const status = onlineStatus[String(userId)]
     if (!status) return ''
     if (status.status === 'online') return 'Đang hoạt động'
@@ -1647,6 +1787,7 @@ const Home = () => {
             sentRequests={sentRequests}
             friendRequests={friendRequests}
             handleUnfriend={handleUnfriend}
+            handleSendRequest={handleSendRequest}
             messages={messages}
             isSystemGroupMessage={isSystemGroupMessage}
             isDifferentDay={isDifferentDay}
@@ -1692,6 +1833,8 @@ const Home = () => {
             handleLeaveGroup={handleLeaveGroup}
             handleDeleteGroup={handleDeleteGroup}
             toggleBlock={toggleBlock}
+            isBlockedUser={isBlockedUser}
+            getDirectParticipantId={getDirectParticipantId}
             blockedUsers={blockedUsers}
           />
         )
@@ -1779,7 +1922,7 @@ const Home = () => {
             setShowJoinGroupModal(true)
             setJoinGroupCode('')
           }}
-          error={error}
+          error={sidebarError}
           friendsView={friendsView}
           friendRequestCount={friendRequests.length}
           onChangeFriendsView={setFriendsView}

@@ -113,6 +113,17 @@ const socketService = {
     if (socket) socket.on('friend_removed', callback)
   },
 
+  // ── Block/Unblock events ──────────────────────────────────────────────
+
+  // Khi bản thân chặn/bỏ chặn ai đó
+  onUserBlocked: (callback) => {
+    if (socket) socket.on('user_blocked', callback)
+  },
+
+  onUserUnblocked: (callback) => {
+    if (socket) socket.on('user_unblocked', callback)
+  },
+
   // ────────────────────────────────────────────────────────────────────────
 
   // Unsubscribe from event

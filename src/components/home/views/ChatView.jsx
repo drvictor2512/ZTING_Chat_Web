@@ -26,6 +26,7 @@ const ChatView = ({
     sentRequests,
     friendRequests,
     handleUnfriend,
+    handleSendRequest,
     messages,
     isSystemGroupMessage,
     isDifferentDay,
@@ -71,6 +72,8 @@ const ChatView = ({
     handleLeaveGroup,
     handleDeleteGroup,
     toggleBlock,
+    isBlockedUser,
+    getDirectParticipantId,
     blockedUsers
 }) => {
     return (
@@ -594,17 +597,56 @@ const ChatView = ({
                                             ) : null
                                         })()}
                                         <div className="info-buttons">
+                                            {(() => {
+                                                const directContactId = getDirectParticipantId
+                                                    ? getDirectParticipantId(selectedContact)
+                                                    : selectedContact.participantId
+                                                const blocked = directContactId
+                                                    ? (isBlockedUser?.(directContactId) || blockedUsers.includes(directContactId))
+                                                    : false
+                                                return (
                                             <button className="btn-block" onClick={toggleBlock}>
-                                                {blockedUsers.includes(selectedContact.participantId) ? 'Bỏ chặn' : 'Chặn'}
+                                                {blocked ? 'Bỏ chặn' : 'Chặn'}
                                             </button>
+                                                )
+                                            })()}
                                             {(() => {
                                                 const contactId = selectedContact.participantId || selectedContact._id
                                                 const isFriend = friends.some(f => f._id === contactId)
-                                                return isFriend ? (
-                                                    <button className="btn-unfriend" onClick={() => handleUnfriend(contactId)}>
-                                                        Hủy kết bạn
-                                                    </button>
-                                                ) : null
+                                                const sentRequest = sentRequests.find(r => {
+                                                    const toId = r.toUserId?._id || r.toUserId
+                                                    return toId === contactId
+                                                })
+                                                const incomingRequest = friendRequests.find(r => {
+                                                    const fromId = r.fromUserId?._id || r.fromUserId
+                                                    return fromId === contactId
+                                                })
+                                                
+                                                if (isFriend) {
+                                                    return (
+                                                        <button className="btn-unfriend" onClick={() => handleUnfriend(contactId)}>
+                                                            Hủy kết bạn
+                                                        </button>
+                                                    )
+                                                } else if (sentRequest) {
+                                                    return (
+                                                        <button className="btn-warning" disabled>
+                                                            Đã gửi
+                                                        </button>
+                                                    )
+                                                } else if (incomingRequest) {
+                                                    return (
+                                                        <button className="btn" onClick={() => handleUnfriend(contactId)}>
+                                                            Cách từ chối
+                                                        </button>
+                                                    )
+                                                } else {
+                                                    return (
+                                                        <button className="btn" onClick={() => handleSendRequest(contactId)}>
+                                                            Kết bạn
+                                                        </button>
+                                                    )
+                                                }
                                             })()}
                                         </div>
                                     </div>
