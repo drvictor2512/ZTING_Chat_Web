@@ -8,7 +8,8 @@ import {
     MdEmojiEmotions,
     MdAttachFile,
     MdVideocam,
-    MdSend
+    MdSend,
+    MdMoreVert
 } from 'react-icons/md'
 
 const ChatView = ({
@@ -71,8 +72,76 @@ const ChatView = ({
     handleLeaveGroup,
     handleDeleteGroup,
     toggleBlock,
-    blockedUsers
+    blockedUsers,
+    handleRecallMessage,
+    messageMenuOpen,
+    setMessageMenuOpen
 }) => {
+    // Extract media and files from messages
+    const getMediaAndFiles = () => {
+        const mediaList = []
+        const fileList = []
+
+        messages.forEach(msg => {
+            if (msg.isRecalled) return
+
+            // Check fileUrl first
+            if (msg.fileUrl) {
+                if (isImageUrl(msg.fileUrl) || isGifUrl(msg.fileUrl)) {
+                    mediaList.push({
+                        id: msg._id,
+                        url: msg.fileUrl,
+                        type: 'image',
+                        timestamp: msg.createdAt
+                    })
+                } else if (isVideoUrl(msg.fileUrl)) {
+                    mediaList.push({
+                        id: msg._id,
+                        url: msg.fileUrl,
+                        type: 'video',
+                        timestamp: msg.createdAt
+                    })
+                } else if (isDocumentUrl(msg.fileUrl)) {
+                    fileList.push({
+                        id: msg._id,
+                        url: msg.fileUrl,
+                        name: basenameFromUrl(msg.fileUrl),
+                        timestamp: msg.createdAt
+                    })
+                }
+            }
+
+            // Check content for media
+            if (msg.content) {
+                if (isImageUrl(msg.content) || isGifUrl(msg.content)) {
+                    mediaList.push({
+                        id: msg._id + '_content',
+                        url: msg.content,
+                        type: 'image',
+                        timestamp: msg.createdAt
+                    })
+                } else if (isVideoUrl(msg.content)) {
+                    mediaList.push({
+                        id: msg._id + '_content',
+                        url: msg.content,
+                        type: 'video',
+                        timestamp: msg.createdAt
+                    })
+                } else if (isDocumentUrl(msg.content)) {
+                    fileList.push({
+                        id: msg._id + '_content',
+                        url: msg.content,
+                        name: basenameFromUrl(msg.content),
+                        timestamp: msg.createdAt
+                    })
+                }
+            }
+        })
+
+        return { mediaList, fileList }
+    }
+
+    const { mediaList, fileList } = getMediaAndFiles()
     return (
         <div className="main-area chat-view">
             {conversations.length === 0 ? (
@@ -345,9 +414,35 @@ const ChatView = ({
                                                                     )}
                                                                 </span>
                                                             )}
-                                                            {msg.createdAt && (
-                                                                <span className="message-time">{formatTime(msg.createdAt)}</span>
-                                                            )}
+                                                            <div className="message-footer">
+                                                                {msg.createdAt && (
+                                                                    <span className="message-time">{formatTime(msg.createdAt)}</span>
+                                                                )}
+                                                                {group.isMine && !msg.isRecalled && (
+                                                                    <div className="message-menu-container">
+                                                                        <button
+                                                                            className="message-menu-btn"
+                                                                            onClick={() => setMessageMenuOpen(messageMenuOpen === msg._id ? null : msg._id)}
+                                                                            title="Tùy chọn"
+                                                                        >
+                                                                            <MdMoreVert size={16} />
+                                                                        </button>
+                                                                        {messageMenuOpen === msg._id && (
+                                                                            <div className="message-menu-dropdown">
+                                                                                <button
+                                                                                    className="message-menu-item"
+                                                                                    onClick={() => {
+                                                                                        handleRecallMessage(msg._id, msg.conversationId)
+                                                                                        setMessageMenuOpen(null)
+                                                                                    }}
+                                                                                >
+                                                                                    Thu hồi tin nhắn
+                                                                                </button>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -585,9 +680,50 @@ const ChatView = ({
                                                 </div>
                                                 <div className="info-section">
                                                     <h4>Ảnh/Video</h4>
+                                                    {mediaList.length > 0 ? (
+                                                        <div className="media-grid">
+                                                            {mediaList.map(media => (
+                                                                <div
+                                                                    key={media.id}
+                                                                    className="media-item"
+                                                                    onClick={() => openMediaModal(media.url, media.type)}
+                                                                    title={media.type === 'video' ? 'Nhấn để xem video' : 'Nhấn để xem ảnh'}
+                                                                >
+                                                                    {media.type === 'image' ? (
+                                                                        <img src={media.url} alt="thumbnail" />
+                                                                    ) : (
+                                                                        <div className="video-thumbnail">
+                                                                            <video src={media.url} />
+                                                                            <div className="play-icon">▶</div>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <p className="no-content">Chưa có ảnh/video</p>
+                                                    )}
                                                 </div>
                                                 <div className="info-section">
                                                     <h4>File</h4>
+                                                    {fileList.length > 0 ? (
+                                                        <div className="file-list">
+                                                            {fileList.map(file => (
+                                                                <div key={file.id} className="file-item">
+                                                                    <span className="file-name" title={file.name}>{file.name}</span>
+                                                                    <button
+                                                                        className="file-download-btn"
+                                                                        onClick={() => downloadFile(file.url, file.name)}
+                                                                        title="Tải về"
+                                                                    >
+                                                                        ⬇
+                                                                    </button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <p className="no-content">Chưa có file</p>
+                                                    )}
                                                 </div>
 
                                                 <div className="group-footer-actions">
@@ -621,9 +757,50 @@ const ChatView = ({
                                     <div className="info-body">
                                         <div className="info-section">
                                             <h4>Ảnh/Video</h4>
+                                            {mediaList.length > 0 ? (
+                                                <div className="media-grid">
+                                                    {mediaList.map(media => (
+                                                        <div
+                                                            key={media.id}
+                                                            className="media-item"
+                                                            onClick={() => openMediaModal(media.url, media.type)}
+                                                            title={media.type === 'video' ? 'Nhấn để xem video' : 'Nhấn để xem ảnh'}
+                                                        >
+                                                            {media.type === 'image' ? (
+                                                                <img src={media.url} alt="thumbnail" />
+                                                            ) : (
+                                                                <div className="video-thumbnail">
+                                                                    <video src={media.url} />
+                                                                    <div className="play-icon">▶</div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p className="no-content">Chưa có ảnh/video</p>
+                                            )}
                                         </div>
                                         <div className="info-section">
                                             <h4>File</h4>
+                                            {fileList.length > 0 ? (
+                                                <div className="file-list">
+                                                    {fileList.map(file => (
+                                                        <div key={file.id} className="file-item">
+                                                            <span className="file-name" title={file.name}>{file.name}</span>
+                                                            <button
+                                                                className="file-download-btn"
+                                                                onClick={() => downloadFile(file.url, file.name)}
+                                                                title="Tải về"
+                                                            >
+                                                                ⬇
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p className="no-content">Chưa có file</p>
+                                            )}
                                         </div>
                                     </div>
                                 </>

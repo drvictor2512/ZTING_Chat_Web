@@ -292,6 +292,19 @@ const conversationService = {
       const err = new Error(errorMessage)
       throw err
     }
+  },
+
+  // Recall a message
+  recallMessage: async (messageId) => {
+    try {
+      const response = await api.patch(`/messages/${messageId}/recall`)
+      return response.data
+    } catch (error) {
+      const errorData = error.response?.data
+      const errorMessage = errorData?.message || error.message || 'Không thể thu hồi tin nhắn'
+      const err = new Error(errorMessage)
+      throw err
+    }
   }
 }
 
