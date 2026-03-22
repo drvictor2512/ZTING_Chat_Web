@@ -252,7 +252,7 @@ const Home = () => {
       if (selectedContact?.type === 'DIRECT' && selectedContact?.participantId && isBlockedUser(newMsg.senderId)) {
         return
       }
-      
+
       // Only add message if it's from the current conversation
       if (selectedContact && String(newMsg.conversationId) === String(selectedContact._id)) {
         setMessages(prev => {
@@ -275,7 +275,7 @@ const Home = () => {
               ? { ...msg, isRecalled: true, content: null, fileUrl: null }
               : msg
           )
-          
+
           // Check if this is the latest message and update sidebar if so
           if (updated.length > 0 && String(updated[updated.length - 1]._id) === String(messageId)) {
             setConversations(convs =>
@@ -294,7 +294,7 @@ const Home = () => {
               )
             )
           }
-          
+
           return updated
         })
       }
@@ -484,7 +484,7 @@ const Home = () => {
 
     const handleAIUserMessage = ({ message } = {}) => {
       if (!message) return
-      setAiMessages(prev => 
+      setAiMessages(prev =>
         prev.some(m => String(m._id) === String(message._id)) ? prev : [...prev, message]
       )
     }
@@ -492,16 +492,16 @@ const Home = () => {
     const AI_STREAM_ID = '__ai_streaming__'
     const AI_BOT_ID = '000000000000000000000001'
     const AI_BOT_NAME = 'ZTING AI'
-    const AI_BOT_AVATAR = 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Google_Gemini_logo.svg/120px-Google_Gemini_logo.svg.png'
+    const AI_BOT_AVATAR = 'https://img.icons8.com/?size=100&id=6nsw3h9gk8M8&format=png&color=000000'
 
     const handleAIChunk = ({ text } = {}) => {
       if (!text) return
       setAiMessages(prev => {
         const hasStreaming = prev.some(m => m._id === AI_STREAM_ID)
         if (hasStreaming) {
-          return prev.map(m => 
-            m._id === AI_STREAM_ID 
-              ? { ...m, content: (m.content || '') + text } 
+          return prev.map(m =>
+            m._id === AI_STREAM_ID
+              ? { ...m, content: (m.content || '') + text }
               : m
           )
         }
@@ -518,10 +518,10 @@ const Home = () => {
 
     const handleAIDone = ({ message } = {}) => {
       if (!message) return
-      setAiMessages(prev => 
-        prev.map(m => 
-          m._id === AI_STREAM_ID 
-            ? { ...message, _streaming: false } 
+      setAiMessages(prev =>
+        prev.map(m =>
+          m._id === AI_STREAM_ID
+            ? { ...message, _streaming: false }
             : m
         )
       )
@@ -940,12 +940,12 @@ const Home = () => {
         )
       }
       let msgs = res.messages || []
-      
+
       // Filter out messages from blocked users (for direct conversations)
       if (selectedContact?.type === 'DIRECT' && selectedContact?.participantId) {
         msgs = msgs.filter(msg => !isBlockedUser(msg.senderId))
       }
-      
+
       setMessages(msgs)
     } catch (err) {
       console.error('Không thể tải tin nhắn', err)
@@ -977,7 +977,7 @@ const Home = () => {
       const targetUserId = getDirectParticipantId(selectedContact)
       if (!targetUserId) return
       const isCurrentlyBlocked = isBlockedUser(targetUserId)
-      
+
       if (isCurrentlyBlocked) {
         // Optimistically update UI before API call
         setBlockedUsers(prev => prev.filter(id => normalizeUserId(id) !== targetUserId))
@@ -1576,7 +1576,7 @@ const Home = () => {
   const handleRecallMessage = async (messageId, conversationId) => {
     try {
       await conversationService.recallMessage(messageId)
-      
+
       // Update the message in the local state
       setMessages(prev =>
         prev.map(msg =>
@@ -1694,7 +1694,7 @@ const Home = () => {
   // Handle clear AI chat
   const handleClearAIChat = async () => {
     if (!aiConversation) return
-    
+
     const confirmed = await openConfirmPopup({
       title: 'Làm mới cuộc trò chuyện',
       message: 'Bạn chắc chắn muốn xóa tất cả tin nhắn trong cuộc trò chuyện này?',
@@ -1964,12 +1964,12 @@ const Home = () => {
   // helper: status text cho 1 user (online/offline + lần cuối online)
   const getUserStatusText = (userId) => {
     if (!userId) return ''
-    
+
     // Hide status for blocked users
     if (isBlockedUser(userId)) {
       return ''
     }
-    
+
     const status = onlineStatus[String(userId)]
     if (!status) return ''
     if (status.status === 'online') return 'Đang hoạt động'
@@ -2145,7 +2145,7 @@ const Home = () => {
         if (!aiConversation) {
           return (
             <div className="main-area ai-view" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <button 
+              <button
                 onClick={handleOpenAIChat}
                 style={{
                   padding: '12px 24px',

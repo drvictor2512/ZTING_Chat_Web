@@ -3,7 +3,7 @@ import { MdSend, MdAttachFile, MdRefresh } from 'react-icons/md'
 
 const AI_BOT_ID = '000000000000000000000001'
 const AI_BOT_NAME = 'ZTING AI'
-const AI_BOT_AVATAR = 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Google_Gemini_logo.svg/120px-Google_Gemini_logo.svg.png'
+const AI_BOT_AVATAR = 'https://img.icons8.com/?size=100&id=6nsw3h9gk8M8&format=png&color=000000'
 const AI_STREAM_ID = '__ai_streaming__'
 
 const AIView = ({
@@ -37,12 +37,12 @@ const AIView = ({
   const handleSend = () => {
     if (aiTyping || isUploadingFile) return
     if (!newMessage.trim() && !pendingFile) return
-    
+
     onSendMessage({
       content: newMessage.trim() || undefined,
       file: pendingFile
     })
-    
+
     setNewMessage('')
     setPendingFile(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -72,7 +72,7 @@ const AIView = ({
                 <p className="chat-status">Trợ lý AI • Hỗ trợ học tập & cuộc sống</p>
               </div>
             </div>
-            <button 
+            <button
               className="btn-refresh"
               onClick={onClearChat}
               disabled={aiTyping || showWelcome}
@@ -107,7 +107,7 @@ const AIView = ({
               messages.map((msg, idx) => {
                 const isAI = String(msg.senderId?._id) === AI_BOT_ID
                 const isStreaming = msg._streaming || msg._id === AI_STREAM_ID
-                
+
                 return (
                   <div key={msg._id || idx} className={`message-group-ai ${isAI ? 'ai-message' : 'user-message'}`}>
                     <div className="msg-avatar-ai">

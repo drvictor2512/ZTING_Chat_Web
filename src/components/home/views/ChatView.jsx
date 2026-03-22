@@ -75,7 +75,7 @@ const ChatView = ({
     toggleBlock,
     handleRecallMessage,
     messageMenuOpen,
-    setMessageMenuOpen
+    setMessageMenuOpen,
     isBlockedUser,
     getDirectParticipantId,
     blockedUsers
@@ -741,9 +741,9 @@ const ChatView = ({
                                                     ? (isBlockedUser?.(directContactId) || blockedUsers.includes(directContactId))
                                                     : false
                                                 return (
-                                            <button className="btn-block" onClick={toggleBlock}>
-                                                {blocked ? 'Bỏ chặn' : 'Chặn'}
-                                            </button>
+                                                    <button className="btn-block" onClick={toggleBlock}>
+                                                        {blocked ? 'Bỏ chặn' : 'Chặn'}
+                                                    </button>
                                                 )
                                             })()}
                                             {(() => {
@@ -757,7 +757,7 @@ const ChatView = ({
                                                     const fromId = r.fromUserId?._id || r.fromUserId
                                                     return fromId === contactId
                                                 })
-                                                
+
                                                 if (isFriend) {
                                                     return (
                                                         <button className="btn-unfriend" onClick={() => handleUnfriend(contactId)}>
