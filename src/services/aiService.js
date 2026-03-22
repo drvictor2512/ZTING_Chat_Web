@@ -1,30 +1,34 @@
 import api from '../config/api'
 
 const aiService = {
-  // Send message to AI and get response
-  sendMessage: async (message) => {
+  // Get or create AI conversation
+  getAIConversation: async () => {
     try {
-      const response = await api.post('/ai/chat', { message })
+      const response = await api.get('/ai/conversation')
       return response.data
     } catch (error) {
       throw error.response?.data || error.message
     }
   },
 
-  // Get AI chat history
-  getChatHistory: async () => {
+  // Get AI messages
+  getAIMessages: async (conversationId, params = {}) => {
     try {
-      const response = await api.get('/ai/history')
+      const response = await api.get('/ai/messages', {
+        params: { conversationId, ...params }
+      })
       return response.data
     } catch (error) {
       throw error.response?.data || error.message
     }
   },
 
-  // Clear AI chat history
-  clearHistory: async () => {
+  // Clear AI messages
+  clearAIMessages: async (conversationId) => {
     try {
-      const response = await api.delete('/ai/history')
+      const response = await api.delete('/ai/messages', {
+        params: { conversationId }
+      })
       return response.data
     } catch (error) {
       throw error.response?.data || error.message

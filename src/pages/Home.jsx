@@ -7,6 +7,7 @@ import authService from '../services/authService'
 import conversationService from '../services/conversationService'
 import friendService from '../services/friendService'
 import userService from '../services/userService'
+import aiService from '../services/aiService'
 import socketService from '../services/socketService'
 import { isImageUrl, isVideoUrl, isGifUrl, isDocumentUrl, basenameFromUrl, downloadFile } from '../utils/mediaHelpers'
 import AppSidebar from '../components/home/AppSidebar'
@@ -19,6 +20,7 @@ import SendRequestModal from '../components/home/SendRequestModal'
 import GroupModals from '../components/home/GroupModals'
 import ChatView from '../components/home/views/ChatView'
 import FriendsView from '../components/home/views/FriendsView'
+import AIView from '../components/home/views/AIView'
 import SettingsView from '../components/home/views/SettingsView'
 import '../styles/home.css'
 
@@ -50,6 +52,7 @@ const Home = () => {
   const [mediaModalUrl, setMediaModalUrl] = useState(null)
   const [mediaModalType, setMediaModalType] = useState('image')
   const [mediaModalName, setMediaModalName] = useState(null)
+  const [messageMenuOpen, setMessageMenuOpen] = useState(null)
   const [showInfoPanel, setShowInfoPanel] = useState(false)
   const [blockedUsers, setBlockedUsers] = useState([])
   const [onlineStatus, setOnlineStatus] = useState({}) // { userId: { status: 'online'|'offline', lastSeen: timestamp } }
@@ -170,6 +173,12 @@ const Home = () => {
     danger: false
   })
 
+  // AI Chat states
+  const [aiMessages, setAiMessages] = useState([])
+  const [aiTyping, setAiTyping] = useState(false)
+  const [aiConversation, setAiConversation] = useState(null)
+  const fileInputRefAI = useRef(null)
+
   useEffect(() => {
     if (error) {
       toast.error(error, { id: 'home-error-toast' })
@@ -260,13 +269,34 @@ const Home = () => {
     const handleMessageRecalled = (data) => {
       const { messageId, conversationId } = data
       if (String(conversationId) === String(selectedContact?._id)) {
-        setMessages(prev =>
-          prev.map(msg =>
+        setMessages(prev => {
+          const updated = prev.map(msg =>
             String(msg._id) === String(messageId)
               ? { ...msg, isRecalled: true, content: null, fileUrl: null }
               : msg
           )
-        )
+          
+          // Check if this is the latest message and update sidebar if so
+          if (updated.length > 0 && String(updated[updated.length - 1]._id) === String(messageId)) {
+            setConversations(convs =>
+              convs.map(conv =>
+                String(conv._id) === String(conversationId)
+                  ? {
+                    ...conv,
+                    lastMessage: {
+                      ...conv.lastMessage,
+                      isRecalled: true,
+                      content: null,
+                      fileUrl: null
+                    }
+                  }
+                  : conv
+              )
+            )
+          }
+          
+          return updated
+        })
       }
     }
 
@@ -447,6 +477,76 @@ const Home = () => {
     }
   }, [])
 
+  // Listen for AI events
+  useEffect(() => {
+    const socket = socketService.getSocket()
+    if (!socket) return
+
+    const handleAIUserMessage = ({ message } = {}) => {
+      if (!message) return
+      setAiMessages(prev => 
+        prev.some(m => String(m._id) === String(message._id)) ? prev : [...prev, message]
+      )
+    }
+
+    const AI_STREAM_ID = '__ai_streaming__'
+    const AI_BOT_ID = '000000000000000000000001'
+    const AI_BOT_NAME = 'ZTING AI'
+    const AI_BOT_AVATAR = 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Google_Gemini_logo.svg/120px-Google_Gemini_logo.svg.png'
+
+    const handleAIChunk = ({ text } = {}) => {
+      if (!text) return
+      setAiMessages(prev => {
+        const hasStreaming = prev.some(m => m._id === AI_STREAM_ID)
+        if (hasStreaming) {
+          return prev.map(m => 
+            m._id === AI_STREAM_ID 
+              ? { ...m, content: (m.content || '') + text } 
+              : m
+          )
+        }
+        return [...prev, {
+          _id: AI_STREAM_ID,
+          content: text,
+          senderId: { _id: AI_BOT_ID, name: AI_BOT_NAME, avatarUrl: AI_BOT_AVATAR },
+          conversationId: aiConversation?._id,
+          createdAt: new Date().toISOString(),
+          _streaming: true,
+        }]
+      })
+    }
+
+    const handleAIDone = ({ message } = {}) => {
+      if (!message) return
+      setAiMessages(prev => 
+        prev.map(m => 
+          m._id === AI_STREAM_ID 
+            ? { ...message, _streaming: false } 
+            : m
+        )
+      )
+      setAiTyping(false)
+    }
+
+    const handleAIError = ({ message: errMsg } = {}) => {
+      setAiMessages(prev => prev.filter(m => m._id !== AI_STREAM_ID))
+      toast.error(errMsg || 'Lỗi AI', { id: 'ai-error-toast' })
+      setAiTyping(false)
+    }
+
+    socket.on('ai_user_message', handleAIUserMessage)
+    socket.on('ai_chunk', handleAIChunk)
+    socket.on('ai_done', handleAIDone)
+    socket.on('ai_error', handleAIError)
+
+    return () => {
+      socket.off('ai_user_message', handleAIUserMessage)
+      socket.off('ai_chunk', handleAIChunk)
+      socket.off('ai_done', handleAIDone)
+      socket.off('ai_error', handleAIError)
+    }
+  }, [aiConversation])
+
   // Update filtered contacts based on search term and current view
   useEffect(() => {
     const term = searchTerm.trim().toLowerCase()
@@ -603,6 +703,8 @@ const Home = () => {
       await loadFriendRequests()
     } else if (view === 'chat') {
       await loadConversations()
+    } else if (view === 'ai') {
+      await handleOpenAIChat()
     }
   }
 
@@ -816,6 +918,27 @@ const Home = () => {
   const loadMessages = async (conversationId) => {
     try {
       const res = await conversationService.getMessages(conversationId)
+      const loadedMessages = res.messages || []
+      setMessages(loadedMessages)
+
+      // Sync the last message status to conversations state
+      // This ensures the sidebar shows correct status after reload
+      if (loadedMessages.length > 0) {
+        const lastLoadedMessage = loadedMessages[loadedMessages.length - 1]
+        setConversations(prev =>
+          prev.map(conv =>
+            String(conv._id) === String(conversationId)
+              ? {
+                ...conv,
+                lastMessage: {
+                  ...conv.lastMessage,
+                  ...lastLoadedMessage // Override with latest message data from backend
+                }
+              }
+              : conv
+          )
+        )
+      }
       let msgs = res.messages || []
       
       // Filter out messages from blocked users (for direct conversations)
@@ -1449,6 +1572,154 @@ const Home = () => {
     }
   }
 
+  // Handle recall message
+  const handleRecallMessage = async (messageId, conversationId) => {
+    try {
+      await conversationService.recallMessage(messageId)
+      
+      // Update the message in the local state
+      setMessages(prev =>
+        prev.map(msg =>
+          String(msg._id) === String(messageId)
+            ? { ...msg, isRecalled: true, content: null, fileUrl: null }
+            : msg
+        )
+      )
+
+      // Check if this is the latest message in the conversation
+      if (messages.length > 0) {
+        const messageIndex = messages.findIndex(m => String(m._id) === String(messageId))
+        if (messageIndex === messages.length - 1) {
+          // This is the latest message, update sidebar
+          setConversations(prev =>
+            prev.map(conv =>
+              String(conv._id) === String(conversationId)
+                ? {
+                  ...conv,
+                  lastMessage: {
+                    ...conv.lastMessage,
+                    isRecalled: true,
+                    content: null,
+                    fileUrl: null
+                  }
+                }
+                : conv
+            )
+          )
+        }
+      }
+    } catch (err) {
+      console.error('Lỗi khi thu hồi tin nhắn:', err)
+      setError(err.message || 'Không thể thu hồi tin nhắn')
+    }
+  }
+
+  // Handle open AI chat
+  const handleOpenAIChat = async () => {
+    try {
+      const res = await aiService.getAIConversation()
+      const conv = res.conversation
+      setAiConversation(conv)
+      try {
+        const msgRes = await aiService.getAIMessages(conv._id)
+        const msgs = msgRes.messages || []
+        const AI_WELCOME_MSG = {
+          _id: '__ai_welcome__',
+          content: `Xin chào! Tôi là ZTING AI — trợ lý AI được tích hợp trong ứng dụng chat này.\n\nTôi có thể giúp bạn:\n📚 Hỗ trợ học tập — giải thích khái niệm, tóm tắt tài liệu, hướng dẫn bài tập\n💬 Tư vấn cuộc sống — lời khuyên tích cực\n🖼️ Phân tích ảnh & file`,
+          senderId: { _id: '000000000000000000000001', name: 'ZTING AI', avatarUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Google_Gemini_logo.svg/120px-Google_Gemini_logo.svg.png' },
+          createdAt: new Date().toISOString(),
+          _isWelcome: true,
+        }
+        setAiMessages(msgs.length === 0 ? [AI_WELCOME_MSG] : msgs)
+      } catch {
+        setAiMessages([{
+          _id: '__ai_welcome__',
+          content: `Xin chào! Tôi là ZTING AI — trợ lý AI được tích hợp trong ứng dụng chat này.\n\nTôi có thể giúp bạn:\n📚 Hỗ trợ học tập — giải thích khái niệm, tóm tắt tài liệu, hướng dẫn bài tập\n💬 Tư vấn cuộc sống — lời khuyên tích cực\n🖼️ Phân tích ảnh & file`,
+          senderId: { _id: '000000000000000000000001', name: 'ZTING AI', avatarUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Google_Gemini_logo.svg/120px-Google_Gemini_logo.svg.png' },
+          createdAt: new Date().toISOString(),
+          _isWelcome: true,
+        }])
+      }
+      setCurrentView('ai')
+    } catch (err) {
+      console.error('Lỗi khi mở chat AI:', err)
+      toast.error(err.message || 'Không thể mở chat AI', { id: 'ai-open-chat-error' })
+    }
+  }
+
+  // Handle send AI message
+  const handleSendAIMessage = async ({ content, file } = {}) => {
+    if (!aiConversation) return
+    if (!content && !file) return
+    if (aiTyping) return
+
+    const socket = socketService.getSocket()
+    if (!socket) {
+      toast.error('Chưa kết nối socket', { id: 'ai-socket-error' })
+      return
+    }
+
+    const token = localStorage.getItem('token')
+    if (!token) {
+      toast.error('Chưa đăng nhập', { id: 'ai-not-logged-in' })
+      return
+    }
+
+    try {
+      setAiTyping(true)
+      setPendingFile(null)
+      setNewMessage('')
+
+      const payload = { token, content: content || undefined }
+      if (file) {
+        const reader = new FileReader()
+        reader.onload = () => {
+          payload.file = { data: reader.result.split(',')[1], mimeType: file.type }
+          socket.emit('ai_message', payload)
+        }
+        reader.onerror = () => {
+          setAiTyping(false)
+          toast.error('Không thể đọc file', { id: 'ai-file-read-error' })
+        }
+        reader.readAsDataURL(file)
+      } else {
+        socket.emit('ai_message', payload)
+      }
+    } catch (err) {
+      setAiTyping(false)
+      toast.error(err.message || 'Lỗi khi gửi tin nhắn', { id: 'ai-send-error' })
+    }
+  }
+
+  // Handle clear AI chat
+  const handleClearAIChat = async () => {
+    if (!aiConversation) return
+    
+    const confirmed = await openConfirmPopup({
+      title: 'Làm mới cuộc trò chuyện',
+      message: 'Bạn chắc chắn muốn xóa tất cả tin nhắn trong cuộc trò chuyện này?',
+      confirmText: 'Xóa',
+      danger: true
+    })
+
+    if (!confirmed) return
+
+    try {
+      await aiService.clearAIMessages(aiConversation._id)
+      const AI_WELCOME_MSG = {
+        _id: '__ai_welcome__',
+        content: `Xin chào! Tôi là ZTING AI — trợ lý AI được tích hợp trong ứng dụng chat này.\n\nTôi có thể giúp bạn:\n📚 Hỗ trợ học tập — giải thích khái niệm, tóm tắt tài liệu, hướng dẫn bài tập\n💬 Tư vấn cuộc sống — lời khuyên tích cực\n🖼️ Phân tích ảnh & file`,
+        senderId: { _id: '000000000000000000000001', name: 'ZTING AI', avatarUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Google_Gemini_logo.svg/120px-Google_Gemini_logo.svg.png' },
+        createdAt: new Date().toISOString(),
+        _isWelcome: true,
+      }
+      setAiMessages([AI_WELCOME_MSG])
+      toast.success('Đã làm mới cuộc trò chuyện', { id: 'ai-clear-success' })
+    } catch (err) {
+      toast.error(err.message || 'Không thể làm mới cuộc trò chuyện', { id: 'ai-clear-error' })
+    }
+  }
+
   // Handle accept friend request
   const handleAcceptRequest = async (requestId) => {
     try {
@@ -1836,6 +2107,9 @@ const Home = () => {
             isBlockedUser={isBlockedUser}
             getDirectParticipantId={getDirectParticipantId}
             blockedUsers={blockedUsers}
+            handleRecallMessage={handleRecallMessage}
+            messageMenuOpen={messageMenuOpen}
+            setMessageMenuOpen={setMessageMenuOpen}
           />
         )
 
@@ -1868,21 +2142,42 @@ const Home = () => {
         )
 
       case 'ai':
-        return (
-          <div className="main-area ai-view">
-            <div className="ai-container">
-              <h2>Trợ lý AI</h2>
-              <p>Chat với trợ lý AI để nhận hỗ trợ và tư vấn</p>
-              <div className="ai-input">
-                <input
-                  type="text"
-                  placeholder="Nhập câu hỏi cho AI..."
-                  className="ai-input-field"
-                />
-                <button className="send-btn">Gửi</button>
-              </div>
+        if (!aiConversation) {
+          return (
+            <div className="main-area ai-view" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <button 
+                onClick={handleOpenAIChat}
+                style={{
+                  padding: '12px 24px',
+                  background: '#003399',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: 'pointer'
+                }}
+              >
+                Mở Chat AI
+              </button>
             </div>
-          </div>
+          )
+        }
+        return (
+          <AIView
+            messages={aiMessages}
+            setMessages={setAiMessages}
+            aiTyping={aiTyping}
+            onSendMessage={handleSendAIMessage}
+            onClearChat={handleClearAIChat}
+            pendingFile={pendingFile}
+            setPendingFile={setPendingFile}
+            newMessage={newMessage}
+            setNewMessage={setNewMessage}
+            fileInputRef={fileInputRefAI}
+            formatTime={formatTime}
+            isUploadingFile={isUploadingFile}
+          />
         )
 
       case 'settings':
