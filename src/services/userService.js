@@ -70,7 +70,7 @@ const userService = {
   // Block user
   blockUser: async (userId) => {
     try {
-      const response = await api.post('/user/block', { userId })
+      const response = await api.post('/user/block', { targetId: userId })
       return response.data
     } catch (error) {
       throw error.response?.data || error.message
@@ -80,7 +80,7 @@ const userService = {
   // Unblock user
   unblockUser: async (userId) => {
     try {
-      const response = await api.post('/user/unblock', { userId })
+      const response = await api.post('/user/unblock', { targetId: userId })
       return response.data
     } catch (error) {
       throw error.response?.data || error.message
