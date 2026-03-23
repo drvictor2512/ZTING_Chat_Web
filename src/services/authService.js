@@ -73,14 +73,8 @@ const authService = {
 
   // Logout user
   logout: async () => {
-    try {
-      await api.post('/auth/signout')
-    } catch (error) {
-      console.error('Logout error:', error)
-    } finally {
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
-    }
+    localStorage.removeItem('token')
+    localStorage.removeItem('user')
   },
 
   // Change password

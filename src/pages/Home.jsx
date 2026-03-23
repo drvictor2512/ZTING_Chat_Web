@@ -559,7 +559,17 @@ const Home = () => {
             // if we already have a conversation with them, show it; otherwise present pseudo-convo so user can click and start
             const existing = conversations.find(c => String(c.participantId) === String(u._id) || String(c.participantId) === String(u._id))
             if (existing) setFilteredContacts([existing])
-            else setFilteredContacts([{ _id: null, participantId: u._id, participantName: u.name, name: u.name }])
+            else {
+              setFilteredContacts([{
+                _id: null,
+                type: 'DIRECT',
+                pending: true,
+                participantId: u._id,
+                participantName: u.name,
+                participantAvatar: u.avatarUrl || '',
+                name: u.name
+              }])
+            }
           })
           .catch(() => setFilteredContacts([]))
       } else {
@@ -857,25 +867,15 @@ const Home = () => {
       // try find existing conversation với bạn đó
       convo = conversations.find(c => c.participantId === contact._id);
       if (!convo) {
-        try {
-          // tạo cuộc trò chuyện 1-1 mới
-          await conversationService.createConversation({ type: 'DIRECT', memberIds: [contact._id] });
-          await loadConversations();
-          convo = conversations.find(c => c.participantId === contact._id) || {
-            _id: null,
-            participantId: contact._id,
-            participantName: contact.name,
-            name: contact.name
-          };
-        } catch (e) {
-          console.error('Failed to create conversation', e);
-          convo = {
-            _id: null,
-            participantId: contact._id,
-            participantName: contact.name,
-            name: contact.name
-          };
-        }
+        convo = {
+          _id: null,
+          type: 'DIRECT',
+          pending: true,
+          participantId: contact._id,
+          participantName: contact.name,
+          participantAvatar: contact.avatarUrl || '',
+          name: contact.name
+        };
       }
     }
 
@@ -955,8 +955,13 @@ const Home = () => {
   // Watch for selection change or view change
   useEffect(() => {
     if (selectedContact && currentView === 'chat') {
-      setChatNotice('')
-      loadMessages(selectedContact._id)
+      if (selectedContact._id) {
+        setChatNotice('')
+        loadMessages(selectedContact._id)
+      } else {
+        setMessages([])
+        setChatNotice('Cuộc trò chuyện đang ở trạng thái pending. Hãy gửi tin nhắn đầu tiên để bắt đầu.')
+      }
     } else {
       setMessages([])
       setChatNotice('')
@@ -1427,24 +1432,6 @@ const Home = () => {
     try {
       let activeConv = selectedContact
 
-      // If conversation doesn't exist yet, create it first
-      if (!activeConv._id && activeConv.participantId) {
-        try {
-          const created = await conversationService.createConversation({
-            type: 'DIRECT',
-            memberIds: [activeConv.participantId]
-          })
-          await loadConversations()
-          const freshList = await conversationService.getConversations()
-          const convs = freshList.conversations || []
-          activeConv = convs.find(c => String(c._id) === String(created._id)) || created
-          setSelectedContact(activeConv)
-        } catch (err) {
-          setError(err.message || 'Không thể tạo cuộc trò chuyện')
-          return
-        }
-      }
-
       // Create FormData matching Test_Frontend-main
       const form = new FormData()
       const content = newMessage.trim()
@@ -1556,7 +1543,12 @@ const Home = () => {
 
       // If conversation was just created, update selected contact id
       if (!activeConv._id && created?.conversationId) {
-        setSelectedContact(prev => ({ ...prev, _id: created.conversationId }))
+        setSelectedContact(prev => ({
+          ...prev,
+          _id: created.conversationId,
+          type: 'DIRECT',
+          pending: false
+        }))
       }
     } catch (err) {
       console.error('Lỗi khi gửi tin nhắn', err)

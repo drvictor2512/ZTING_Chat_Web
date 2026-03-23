@@ -68,11 +68,15 @@ const ContactList = ({
             ? (contact.unreadCounts[String(currentUser._id)] || 0)
             : 0
           const unreadText = unread > 99 ? '99+' : String(unread)
+          const isPendingConversation = Boolean(contact.pending && !contact._id)
+          const isActive =
+            (selectedContact?._id && contact._id && String(selectedContact._id) === String(contact._id)) ||
+            (!selectedContact?._id && !contact._id && String(selectedContact?.participantId || '') === String(contact.participantId || ''))
 
           return (
             <div
               key={contact._id || contact.participantId}
-              className={`contact-item ${selectedContact?._id === contact._id ? 'active' : ''}`}
+              className={`contact-item ${isActive ? 'active' : ''}`}
               onClick={() => onContactClick(contact)}
             >
               <div
@@ -135,7 +139,9 @@ const ContactList = ({
                   {contact.lastMessage?.isRecalled
                     ? 'Tin nhắn đã được thu hồi'
                     : (contact.lastMessage?.content ||
-                      (!isConversation ? (contact.email || '') : 'Không có tin nhắn'))}
+                      (isPendingConversation
+                        ? 'Pending - Chưa có tin nhắn'
+                        : (!isConversation ? (contact.email || '') : 'Không có tin nhắn')))}
                 </span>
               </div>
             </div>
