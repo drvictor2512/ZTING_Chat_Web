@@ -722,7 +722,13 @@ const ChatView = ({
                                 <>
                                     <div className="info-header">
                                         <div className="avatar-large">
-                                            {(selectedContact.participantName || selectedContact.name || 'U').charAt(0).toUpperCase()}
+                                            {selectedContact?.participantAvatar ? (
+                                                <img src={selectedContact.participantAvatar} alt={selectedContact.participantName || selectedContact.name || 'avatar'} />
+                                            ) : selectedContact?.avatarUrl ? (
+                                                <img src={selectedContact.avatarUrl} alt={selectedContact.participantName || selectedContact.name || 'avatar'} />
+                                            ) : (
+                                                (selectedContact.participantName || selectedContact.name || 'U').charAt(0).toUpperCase()
+                                            )}
                                         </div>
                                         <h3>{selectedContact.participantName || selectedContact.name}</h3>
                                         {(() => {

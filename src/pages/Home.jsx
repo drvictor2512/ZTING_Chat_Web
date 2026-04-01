@@ -643,9 +643,11 @@ const Home = () => {
         if (c.isAI) return null
 
         let displayName = c.name || participantName
+        let groupAvatar = ''
         if (c.type === 'GROUP') {
           // ưu tiên tên group từ backend
           displayName = c.group?.name || c.groupName || c.name || 'Nhóm không tên'
+          groupAvatar = c.group?.avatarUrl || c.groupAvatar || c.avatarUrl || ''
         }
 
         // nếu sau khi chuẩn hoá vẫn không có tên, bỏ qua để tránh dòng trống / lỗi
@@ -657,6 +659,7 @@ const Home = () => {
           participantId,
           participantName,
           participantAvatar,
+          avatarUrl: c.type === 'GROUP' ? groupAvatar : (c.avatarUrl || participantAvatar),
           // name luôn là "tên hiển thị" đã chuẩn hoá ở trên
           name: displayName
         }
@@ -967,6 +970,32 @@ const Home = () => {
       setChatNotice('')
     }
   }, [selectedContact, currentView, blockedUsers])
+
+  // Keep selected conversation metadata (name/avatar/status fields) in sync after reloads.
+  useEffect(() => {
+    if (!selectedContact?._id || selectedContact.type === 'GROUP') return
+
+    const refreshed = conversations.find(c => String(c._id) === String(selectedContact._id))
+    if (!refreshed) return
+
+    setSelectedContact(prev => {
+      if (!prev || String(prev._id) !== String(refreshed._id)) return prev
+
+      const sameName = (prev.name || '') === (refreshed.name || '')
+      const sameParticipantName = (prev.participantName || '') === (refreshed.participantName || '')
+      const sameParticipantAvatar = (prev.participantAvatar || '') === (refreshed.participantAvatar || '')
+      const sameAvatar = (prev.avatarUrl || '') === (refreshed.avatarUrl || '')
+
+      if (sameName && sameParticipantName && sameParticipantAvatar && sameAvatar) {
+        return prev
+      }
+
+      return {
+        ...prev,
+        ...refreshed
+      }
+    })
+  }, [conversations, selectedContact])
 
   // scroll to bottom when messages change
   useEffect(() => {
@@ -1345,8 +1374,6 @@ const Home = () => {
   const [showRenameModal, setShowRenameModal] = useState(false)
   const [newGroupName, setNewGroupName] = useState('')
 
-  const emojis = ['😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😚', '😙', '🥲', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙁', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🤮', '🤧', '🥵', '🥶', '🥴', '😵', '🤯', '🤠', '🥳', '😎', '🤓', '🧐', '😕', '😟', '🙁', '😮', '😯', '😲', '😳', '🥺', '😦', '😧', '😨', '😰', '😥', '😢', '😭', '😱', '😖', '😣', '😞', '😓', '😩', '😫', '🥱', '😤', '😡', '😠', '🤬', '😈', '👿', '💀', '☠️', '💩', '🤡', '👹', '👺', '👻', '👽', '👾', '🤖', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾', '👋', '🤚', '🖐️', '✋', '🖖', '👌', '🤌', '🤏', '✌️', '🤞', '🫰', '🤟', '🤘', '🤙', '👍', '👎', '☝️', '👆', '👇', '☟', '✊', '👊', '🤛', '🤜', '💪', '🦾', '🦿', '🦵', '🦶', '👂', '👃', '🧠', '🦣', '🦴', '🫀', '🫁', '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟', '👋', '🎉', '🎊', '🎈', '🎀', '🎁', '🎂', '🍰', '🎃', '🎄', '⛄', '☃️', '🎆', '🎇', '✨', '🌟', '⭐', '🌠', '🌌', '🌃', '🌆', '🌇', '🌉', '🌁', '⛅', '⛈️', '🌤️', '🌥️', '☁️', '🌦️', '🌧️', '⚡', '🌩️', '🌨️', '❄️', '☃️', '🌬️', '💨', '💧', '💦', '☔', '🍏', '🍎', '🍐', '🍊', '🍋', '🍌', '🍉', '🍇', '🍓', '🍈', '🍒', '🍑', '🥭', '🍍', '🥥', '🥝', '🍅', '🍆', '🥑', '🥦', '🥬', '🥒', '🌶️', '🌽', '🥕', '🥔', '🍠', '🥐', '🥯', '🍞', '🥖', '🥨', '🧀', '🥚', '🍳', '🧈', '🥞', '🥓', '🥔', '🍤', '🍗', '🍖', '🌭', '🍔', '🍟', '🍕', '🥪', '🥙', '🧆', '🌮', '🌯', '🥗', '🥘', '🥫', '🍝', '🍜', '🍲', '🍛', '🍣', '🍱', '🥟', '🦪', '🍤', '🍙', '🍚', '🍘', '🍥', '🥠', '🥮', '🍢', '🍡', '🍧', '🍨', '🍦', '🍰', '🎂', '🍮', '🍭', '🍬', '🍫', '🍿', '🍩', '🍪', '🌰', '🍯', '☕', '🍵', '🍶', '🍾', '🍷', '🍸', '🍹', '🍺', '🍻', '🥂', '🥃']
-
   const handleFileChange = e => {
     const f = e.target.files && e.target.files[0]
     if (!f) return
@@ -1632,7 +1659,6 @@ const Home = () => {
           _isWelcome: true,
         }])
       }
-      setCurrentView('ai')
     } catch (err) {
       console.error('Lỗi khi mở chat AI:', err)
       toast.error(err.message || 'Không thể mở chat AI', { id: 'ai-open-chat-error' })

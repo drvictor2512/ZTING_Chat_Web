@@ -1310,7 +1310,7 @@
   color: #333;
 }
 
-.ai-welcome-content > p {
+.ai-welcome-content>p {
   font-size: 16px;
   color: #666;
   margin: 0 0 20px 0;
@@ -1368,6 +1368,7 @@
     opacity: 0;
     transform: translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -1469,10 +1470,14 @@
 }
 
 @keyframes blink {
-  0%, 49% {
+
+  0%,
+  49% {
     opacity: 1;
   }
-  50%, 100% {
+
+  50%,
+  100% {
     opacity: 0;
   }
 }
@@ -1504,10 +1509,14 @@
 }
 
 @keyframes typing {
-  0%, 60%, 100% {
+
+  0%,
+  60%,
+  100% {
     opacity: 0.5;
     transform: translateY(0);
   }
+
   30% {
     opacity: 1;
     transform: translateY(-8px);
@@ -3109,6 +3118,17 @@
   background: #c62828;
 }
 
+.profile-footer .btn-close-neutral {
+  background: #f7f9fc;
+  color: #7d8796;
+  border: 1px solid #d7dee9;
+  min-width: 80px;
+}
+
+.profile-footer .btn-close-neutral:hover {
+  background: #eef3fb;
+}
+
 .friend-actions {
   display: flex;
   gap: 10px;
@@ -3139,12 +3159,12 @@
 }
 
 .friend-actions .btn-danger {
-  background: #ff9800;
+  background: #f44336;
   color: #fff;
 }
 
 .friend-actions .btn-danger:hover {
-  background: #e68900;
+  background: #c62828;
 }
 
 .friend-actions .btn-warning {

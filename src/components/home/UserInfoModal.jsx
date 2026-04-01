@@ -119,7 +119,7 @@ const UserInfoModal = ({
                             )}
                         </div>
                     )}
-                    <button className="btn btn-cancel" onClick={onClose}>Đóng</button>
+                    <button className="btn btn-close-neutral" onClick={onClose}>Đóng</button>
                 </div>
             </div>
         </div>

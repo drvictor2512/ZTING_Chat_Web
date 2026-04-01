@@ -44,6 +44,15 @@ const GroupModals = ({
     copyInviteSuccess,
     handleCopyInviteCode
 }) => {
+    const closeActionButtonStyle = {
+        backgroundColor: '#f7f9fc',
+        color: '#7d8796',
+        border: '1px solid #d7dee9',
+        borderRadius: '8px',
+        cursor: 'pointer',
+        fontWeight: 'bold'
+    }
+
     return (
         <>
             {showAddMembersModal && (
@@ -106,7 +115,7 @@ const GroupModals = ({
                                 </button>
                                 <button
                                     onClick={() => setShowAddMembersModal(false)}
-                                    style={{ flex: 1, padding: '10px 20px', backgroundColor: '#e8e8e8', color: '#333', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}
+                                    style={{ ...closeActionButtonStyle, flex: 1, padding: '10px 20px', fontSize: '14px' }}
                                 >
                                     Hủy
                                 </button>
@@ -155,7 +164,7 @@ const GroupModals = ({
                                 </button>
                                 <button
                                     onClick={() => setShowTransferOwnerModal(false)}
-                                    style={{ flex: 1, minHeight: '50px', padding: '0 16px', backgroundColor: '#e8e8e8', color: '#333', border: 'none', borderRadius: '12px', cursor: 'pointer', fontWeight: 700, fontSize: '16px' }}
+                                    style={{ ...closeActionButtonStyle, flex: 1, minHeight: '50px', padding: '0 16px', borderRadius: '12px', fontWeight: 700, fontSize: '16px' }}
                                 >
                                     Hủy
                                 </button>
@@ -211,14 +220,10 @@ const GroupModals = ({
                                 <button
                                     onClick={() => setShowRenameModal(false)}
                                     style={{
+                                        ...closeActionButtonStyle,
                                         flex: 1,
                                         padding: '10px 20px',
-                                        backgroundColor: '#e8e8e8',
-                                        color: '#333',
-                                        border: 'none',
-                                        borderRadius: '8px',
-                                        cursor: 'pointer',
-                                        fontWeight: 'bold'
+                                        borderRadius: '8px'
                                     }}
                                 >
                                     Hủy
@@ -337,14 +342,10 @@ const GroupModals = ({
                                 <button
                                     onClick={() => setShowCreateGroupModal(false)}
                                     style={{
+                                        ...closeActionButtonStyle,
                                         flex: 1,
                                         padding: '10px 20px',
-                                        backgroundColor: '#e8e8e8',
-                                        color: '#333',
-                                        border: 'none',
                                         borderRadius: '8px',
-                                        cursor: 'pointer',
-                                        fontWeight: 'bold',
                                         fontSize: '14px'
                                     }}
                                 >
@@ -409,7 +410,7 @@ const GroupModals = ({
                                 </button>
                                 <button
                                     onClick={() => setShowJoinGroupModal(false)}
-                                    style={{ flex: 1, padding: '10px', backgroundColor: '#e8e8e8', color: '#333', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}
+                                    style={{ ...closeActionButtonStyle, flex: 1, padding: '10px', borderRadius: '8px', fontSize: '14px' }}
                                 >
                                     Hủy
                                 </button>
@@ -444,7 +445,7 @@ const GroupModals = ({
                             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '14px' }}>
                                 <button
                                     onClick={() => setShowInviteCodeModal(false)}
-                                    style={{ width: '94px', height: '40px', border: '1px solid #d7dee9', borderRadius: '10px', background: '#f7f9fc', color: '#7d8796', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}
+                                    style={{ ...closeActionButtonStyle, width: '94px', height: '40px', borderRadius: '10px', fontSize: '14px', fontWeight: 700 }}
                                 >
                                     Đóng
                                 </button>
