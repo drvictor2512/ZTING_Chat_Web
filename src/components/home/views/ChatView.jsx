@@ -201,29 +201,38 @@ const ChatView = ({
                                             const totalGroupMembers = normalizedGroupParticipants.length
                                             const showGroupCountBadge = totalGroupMembers > 4
                                             const groupAvatarItems = (() => {
-                                                const visibleItems = showGroupCountBadge
-                                                    ? groupMembersForAvatar.slice(0, 3)
-                                                    : groupMembersForAvatar.slice(0, 4)
-                                                return visibleItems.length > 0
+                                                const visibleItems = groupMembersForAvatar.slice(0, 4)
+                                                const baseItems = visibleItems.length > 0
                                                     ? visibleItems
                                                     : [{ _id: selectedContact._id || selectedContact.name, name: selectedContact.name || 'G', avatarUrl: selectedContact.avatarUrl || '' }]
+
+                                                if (!showGroupCountBadge) return baseItems
+
+                                                return baseItems.map((item, index) => {
+                                                    if (index !== 3) return item
+                                                    return {
+                                                        _id: `${item._id || selectedContact._id || selectedContact.name}-count`,
+                                                        name: String(totalGroupMembers),
+                                                        avatarUrl: '',
+                                                        isCount: true
+                                                    }
+                                                })
                                             })()
-                                            const groupAvatarStackCount = showGroupCountBadge ? 4 : groupAvatarItems.length
+                                            const groupAvatarStackCount = groupAvatarItems.length
 
                                             return (
                                                 <div className={`group-avatar-stack count-${groupAvatarStackCount}`}>
                                                     {groupAvatarItems.map((member, index) => (
-                                                        <div className={`group-stack-item pos-${index + 1}`} key={member._id}>
-                                                            {member.avatarUrl ? (
+                                                        <div className={`group-stack-item pos-${index + 1} ${member.isCount ? 'is-count' : ''}`} key={member._id}>
+                                                            {member.isCount ? (
+                                                                <span>{member.name}</span>
+                                                            ) : member.avatarUrl ? (
                                                                 <img src={member.avatarUrl} alt={member.name} />
                                                             ) : (
                                                                 <span>{(member.name || 'G').charAt(0).toUpperCase()}</span>
                                                             )}
                                                         </div>
                                                     ))}
-                                                    {showGroupCountBadge && (
-                                                        <span className="group-stack-count">{totalGroupMembers}</span>
-                                                    )}
                                                 </div>
                                             )
                                         })() : (
@@ -577,14 +586,24 @@ const ChatView = ({
                                     const totalGroupMembers = normalizedGroupParticipants.length
                                     const showGroupCountBadge = totalGroupMembers > 4
                                     const groupAvatarItems = (() => {
-                                        const visibleItems = showGroupCountBadge
-                                            ? groupMembersForAvatar.slice(0, 3)
-                                            : groupMembersForAvatar.slice(0, 4)
-                                        return visibleItems.length > 0
+                                        const visibleItems = groupMembersForAvatar.slice(0, 4)
+                                        const baseItems = visibleItems.length > 0
                                             ? visibleItems
                                             : [{ _id: selectedContact._id || selectedContact.name, name: selectedContact.name || 'G', avatarUrl: selectedContact.avatarUrl || '' }]
+
+                                        if (!showGroupCountBadge) return baseItems
+
+                                        return baseItems.map((item, index) => {
+                                            if (index !== 3) return item
+                                            return {
+                                                _id: `${item._id || selectedContact._id || selectedContact.name}-count`,
+                                                name: String(totalGroupMembers),
+                                                avatarUrl: '',
+                                                isCount: true
+                                            }
+                                        })
                                     })()
-                                    const groupAvatarStackCount = showGroupCountBadge ? 4 : groupAvatarItems.length
+                                    const groupAvatarStackCount = groupAvatarItems.length
 
                                     return (
                                         <>
@@ -592,17 +611,16 @@ const ChatView = ({
                                                 <div className="avatar-large group-avatar-large">
                                                     <div className={`group-avatar-stack count-${groupAvatarStackCount}`}>
                                                         {groupAvatarItems.map((member, index) => (
-                                                            <div className={`group-stack-item pos-${index + 1}`} key={member._id}>
-                                                                {member.avatarUrl ? (
+                                                            <div className={`group-stack-item pos-${index + 1} ${member.isCount ? 'is-count' : ''}`} key={member._id}>
+                                                                {member.isCount ? (
+                                                                    <span>{member.name}</span>
+                                                                ) : member.avatarUrl ? (
                                                                     <img src={member.avatarUrl} alt={member.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
                                                                 ) : (
                                                                     <span style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: '#ccc', fontSize: '18px', fontWeight: 'bold' }}>{(member.name || 'G').charAt(0).toUpperCase()}</span>
                                                                 )}
                                                             </div>
                                                         ))}
-                                                        {showGroupCountBadge && (
-                                                            <span className="group-stack-count">{totalGroupMembers}</span>
-                                                        )}
                                                     </div>
                                                 </div>
                                                 <h3>{selectedContact.name}</h3>

@@ -248,6 +248,12 @@ const Home = () => {
   // Listen for real-time messages
   useEffect(() => {
     const handleNewMessage = (newMsg) => {
+      const myId = String(user?._id || '')
+      const convId = String(newMsg?.conversationId || '')
+      const senderId = String(newMsg?.senderId?._id || newMsg?.senderId || '')
+      const isOwnMessage = myId && senderId && senderId === myId
+      const isActiveConversation = selectedContact && String(selectedContact._id) === convId
+
       // Filter out messages from blocked users for direct conversations
       if (selectedContact?.type === 'DIRECT' && selectedContact?.participantId && isBlockedUser(newMsg.senderId)) {
         return
@@ -262,8 +268,37 @@ const Home = () => {
           return [...prev, newMsg]
         })
       }
-      // Update conversation list with new message
-      loadConversations()
+
+      // Update sidebar conversation preview in-place to avoid full reload on every message.
+      setConversations(prev => {
+        if (!convId) return prev
+
+        const idx = prev.findIndex(c => String(c._id) === convId)
+        if (idx < 0) return prev
+
+        const updated = [...prev]
+        const target = updated[idx]
+        const previousUnread = Number(target?.unreadCounts?.[myId] || 0)
+        const nextUnread = (isOwnMessage || isActiveConversation) ? 0 : previousUnread + 1
+
+        const nextConv = {
+          ...target,
+          unreadCounts: {
+            ...(target.unreadCounts || {}),
+            ...(myId ? { [myId]: nextUnread } : {}),
+          },
+          lastMessage: {
+            ...(target.lastMessage || {}),
+            ...newMsg,
+          },
+          lastMessageAt: newMsg?.createdAt || new Date().toISOString(),
+          updatedAt: newMsg?.createdAt || new Date().toISOString(),
+        }
+
+        updated.splice(idx, 1)
+        updated.unshift(nextConv)
+        return updated
+      })
     }
 
     const handleMessageRecalled = (data) => {
@@ -314,7 +349,7 @@ const Home = () => {
         socket.off('message_recalled', handleMessageRecalled)
       }
     }
-  }, [selectedContact, blockedUsers])
+  }, [selectedContact, blockedUsers, user])
 
   // Listen for online/offline status
   useEffect(() => {
@@ -1505,6 +1540,7 @@ const Home = () => {
         : await conversationService.sendDirectMessage(form, progressHandler)
 
       let created = res?.message || null
+      let shouldRefetchConversations = false
 
       // Clear input and file
       setNewMessage('')
@@ -1550,12 +1586,17 @@ const Home = () => {
           const convId = String(created.conversationId)
           const idx = prev.findIndex(c => String(c._id) === convId)
           if (idx === -1) {
-            loadConversations().catch(() => { })
+            shouldRefetchConversations = true
             return prev
           }
           const updated = [...prev]
+          const myId = String(user?._id || '')
           const conv = {
             ...updated[idx],
+            unreadCounts: {
+              ...(updated[idx].unreadCounts || {}),
+              ...(myId ? { [myId]: 0 } : {}),
+            },
             lastMessage: created,
             lastMessageAt: created.createdAt || new Date().toISOString()
           }
@@ -1565,8 +1606,10 @@ const Home = () => {
         })
       }
 
-      // Reload conversations to ensure sidebar is updated
-      await loadConversations()
+      // Fallback refetch only when local state cannot map the updated conversation.
+      if (shouldRefetchConversations) {
+        await loadConversations()
+      }
 
       // If conversation was just created, update selected contact id
       if (!activeConv._id && created?.conversationId) {

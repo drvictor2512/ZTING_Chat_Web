@@ -161,14 +161,23 @@ const FriendsView = ({
                                             }).filter(p => p._id)
 
                                             const groupMemberCount = normalizedParticipants.length
-                                            const showGroupCountBadge = groupMemberCount > 3
-                                            const visibleItems = showGroupCountBadge
-                                                ? normalizedParticipants.slice(0, 2)
-                                                : normalizedParticipants.slice(0, 3)
-                                            const groupAvatarItems = visibleItems.length > 0
+                                            const showGroupCountBadge = groupMemberCount > 4
+                                            const visibleItems = normalizedParticipants.slice(0, 4)
+                                            const baseItems = visibleItems.length > 0
                                                 ? visibleItems
                                                 : [{ _id: group._id || group.name, name: group.name || 'G', avatarUrl: group.avatarUrl || group.group?.avatarUrl || group.groupAvatar || '' }]
-                                            const stackCount = showGroupCountBadge ? 3 : groupAvatarItems.length
+                                            const groupAvatarItems = showGroupCountBadge
+                                                ? baseItems.map((item, index) => {
+                                                    if (index !== 3) return item
+                                                    return {
+                                                        _id: `${item._id || group._id || group.name}-count`,
+                                                        name: String(groupMemberCount),
+                                                        avatarUrl: '',
+                                                        isCount: true
+                                                    }
+                                                })
+                                                : baseItems
+                                            const stackCount = groupAvatarItems.length
 
                                             return (
                                                 <div
@@ -179,17 +188,16 @@ const FriendsView = ({
                                                     <div className="fl-avatar" style={{ backgroundColor: 'transparent', overflow: 'visible' }}>
                                                         <div className={`group-avatar-stack count-${stackCount}`}>
                                                             {groupAvatarItems.map((member, index) => (
-                                                                <div className={`group-stack-item pos-${index + 1}`} key={member._id || `${group._id}-${index}`}>
-                                                                    {member.avatarUrl ? (
+                                                                <div className={`group-stack-item pos-${index + 1} ${member.isCount ? 'is-count' : ''}`} key={member._id || `${group._id}-${index}`}>
+                                                                    {member.isCount ? (
+                                                                        <span>{member.name}</span>
+                                                                    ) : member.avatarUrl ? (
                                                                         <img src={member.avatarUrl} alt={member.name} />
                                                                     ) : (
                                                                         <span>{(member.name || 'G').charAt(0).toUpperCase()}</span>
                                                                     )}
                                                                 </div>
                                                             ))}
-                                                            {showGroupCountBadge && (
-                                                                <span className="group-stack-count">{groupMemberCount}</span>
-                                                            )}
                                                         </div>
                                                     </div>
                                                     <span className="fl-name">{group.name}</span>
