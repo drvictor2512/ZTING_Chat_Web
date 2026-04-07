@@ -243,9 +243,19 @@ const conversationService = {
   sendMessage: async ({ conversationId, recipientId, content, isGroup = false, file, onUploadProgress }) => {
     try {
       const formData = new FormData()
+      const text = typeof content === 'string' ? content.trim() : ''
+      const fileName = file?.name || 'file'
+      const mimeType = String(file?.type || '').toLowerCase()
+      const fallbackContent = file
+        ? (mimeType.startsWith('image/')
+          ? '[Ảnh]'
+          : mimeType.startsWith('video/')
+            ? '[Video]'
+            : `[File] ${fileName}`)
+        : ''
       if (recipientId) formData.append('recipientId', recipientId)
       if (conversationId) formData.append('conversationId', conversationId)
-      if (content !== undefined) formData.append('content', content)
+      if (text || fallbackContent) formData.append('content', text || fallbackContent)
       if (file) {
         // nhận 'file' → gửi cả hai để tương thích.
         formData.append('file', file)
