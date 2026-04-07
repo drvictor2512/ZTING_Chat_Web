@@ -1,6 +1,6 @@
 import io from 'socket.io-client'
 
-const SOCKET_URL = 'https://chatapp-backend-eiae.onrender.com'
+const SOCKET_URL = 'http://localhost:3000'
 
 let socket = null
 

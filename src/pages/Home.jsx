@@ -83,6 +83,21 @@ const Home = () => {
     return ''
   }
 
+  const normalizeConversationId = (value) => {
+    if (!value) return ''
+    if (typeof value === 'string' || typeof value === 'number') return String(value)
+    if (typeof value !== 'object') return ''
+    return String(value._id || value.id || '')
+  }
+
+  const normalizeUnreadCounts = (value) => {
+    if (!value) return {}
+    if (value instanceof Map) return Object.fromEntries(value)
+    if (Array.isArray(value)) return Object.fromEntries(value)
+    if (typeof value === 'object') return value
+    return {}
+  }
+
   const normalizeBlockedUsers = (items = []) =>
     items
       .map(normalizeUserId)
@@ -130,6 +145,8 @@ const Home = () => {
   }
   const [showChangePassword, setShowChangePassword] = useState(false)
   const [passwordForm, setPasswordForm] = useState({ oldPassword: '', newPassword: '', confirmPassword: '' })
+  const [showCloseAccount, setShowCloseAccount] = useState(false)
+  const [closeAccountPassword, setCloseAccountPassword] = useState('')
 
   // Add friend modal states
   const [showAddFriendModal, setShowAddFriendModal] = useState(false)
@@ -249,8 +266,8 @@ const Home = () => {
   useEffect(() => {
     const handleNewMessage = (newMsg) => {
       const myId = String(user?._id || '')
-      const convId = String(newMsg?.conversationId || '')
-      const senderId = String(newMsg?.senderId?._id || newMsg?.senderId || '')
+      const convId = normalizeConversationId(newMsg?.conversationId)
+      const senderId = normalizeUserId(newMsg?.senderId)
       const isOwnMessage = myId && senderId && senderId === myId
       const isActiveConversation = selectedContact && String(selectedContact._id) === convId
 
@@ -270,21 +287,26 @@ const Home = () => {
       }
 
       // Update sidebar conversation preview in-place to avoid full reload on every message.
+      let shouldReloadConversations = false
       setConversations(prev => {
         if (!convId) return prev
 
         const idx = prev.findIndex(c => String(c._id) === convId)
-        if (idx < 0) return prev
+        if (idx < 0) {
+          shouldReloadConversations = true
+          return prev
+        }
 
         const updated = [...prev]
         const target = updated[idx]
-        const previousUnread = Number(target?.unreadCounts?.[myId] || 0)
+        const currentUnreadCounts = normalizeUnreadCounts(target?.unreadCounts)
+        const previousUnread = Number(currentUnreadCounts?.[myId] || 0)
         const nextUnread = (isOwnMessage || isActiveConversation) ? 0 : previousUnread + 1
 
         const nextConv = {
           ...target,
           unreadCounts: {
-            ...(target.unreadCounts || {}),
+            ...currentUnreadCounts,
             ...(myId ? { [myId]: nextUnread } : {}),
           },
           lastMessage: {
@@ -299,6 +321,10 @@ const Home = () => {
         updated.unshift(nextConv)
         return updated
       })
+
+      if (shouldReloadConversations) {
+        loadConversations()
+      }
     }
 
     const handleMessageRecalled = (data) => {
@@ -691,6 +717,7 @@ const Home = () => {
         return {
           ...c,
           participants: populatedParticipants,
+          unreadCounts: normalizeUnreadCounts(c.unreadCounts),
           participantId,
           participantName,
           participantAvatar,
@@ -889,10 +916,43 @@ const Home = () => {
       await authService.changePassword(passwordForm.oldPassword, passwordForm.newPassword)
       setShowChangePassword(false)
       setPasswordForm({ oldPassword: '', newPassword: '', confirmPassword: '' })
-      toast.success('Đổi mật khẩu thành công')
+      await authService.logout()
+      window.dispatchEvent(new Event('authChanged'))
+      toast.success('Đổi mật khẩu thành công, vui lòng đăng nhập lại')
+      navigate('/login')
     } catch (err) {
       console.error(err)
       setError(err.message || 'Có lỗi khi đổi mật khẩu')
+    }
+  }
+
+  const submitCloseAccount = async () => {
+    if (!closeAccountPassword.trim()) {
+      setError('Vui lòng nhập mật khẩu để đóng tài khoản')
+      return
+    }
+
+    const confirmed = await openConfirmPopup({
+      title: 'Đóng tài khoản',
+      message: 'Tài khoản sẽ bị đóng vĩnh viễn. Bạn có chắc chắn muốn tiếp tục?',
+      confirmText: 'Đóng tài khoản',
+      cancelText: 'Hủy',
+      danger: true
+    })
+
+    if (!confirmed) return
+
+    try {
+      await authService.closeAccount(closeAccountPassword)
+      await authService.logout()
+      window.dispatchEvent(new Event('authChanged'))
+      setShowCloseAccount(false)
+      setCloseAccountPassword('')
+      toast.success('Đóng tài khoản thành công')
+      navigate('/login')
+    } catch (err) {
+      console.error(err)
+      setError(err.message || 'Có lỗi khi đóng tài khoản')
     }
   }
 
@@ -2248,6 +2308,10 @@ const Home = () => {
               setError('')
               setShowChangePassword(true)
             }}
+            onOpenCloseAccount={() => {
+              setError('')
+              setShowCloseAccount(true)
+            }}
             onLogout={handleLogout}
           />
         )
@@ -2400,12 +2464,50 @@ const Home = () => {
                 />
               </div>
               <div className="profile-actions">
-                <button className="btn" onClick={submitPasswordChange}>
+                <button className="btn-submit-danger" onClick={submitPasswordChange}>
                   Đổi mật khẩu
                 </button>
                 <button
-                  className="btn btn-cancel"
+                  className="btn-cancel-gray"
                   onClick={() => setShowChangePassword(false)}
+                >
+                  Quay lại
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCloseAccount && (
+        <div className="profile-modal" onClick={() => setShowCloseAccount(false)}>
+          <div className="profile-content" onClick={(e) => e.stopPropagation()}>
+            <div className="profile-header">
+              <h3>Đóng tài khoản</h3>
+              <button
+                className="close-btn"
+                onClick={() => setShowCloseAccount(false)}
+              >
+                <MdClose />
+              </button>
+            </div>
+            {error && <div className="error-message" style={{ padding: '0 20px', color: 'red', fontSize: '13px' }}>{error}</div>}
+            <div className="profile-body">
+              <div className="form-group">
+                <label>Nhập mật khẩu để xác nhận</label>
+                <input
+                  type="password"
+                  value={closeAccountPassword}
+                  onChange={(e) => setCloseAccountPassword(e.target.value)}
+                />
+              </div>
+              <div className="profile-actions">
+                <button className="btn-submit-danger" onClick={submitCloseAccount}>
+                  Đóng tài khoản
+                </button>
+                <button
+                  className="btn-cancel-gray"
+                  onClick={() => setShowCloseAccount(false)}
                 >
                   Quay lại
                 </button>

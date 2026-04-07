@@ -1,4 +1,13 @@
 import React from 'react'
+import { buildLastMessagePreview } from '../../utils/mediaHelpers'
+
+const normalizeUnreadCounts = (value) => {
+  if (!value) return {}
+  if (value instanceof Map) return Object.fromEntries(value)
+  if (Array.isArray(value)) return Object.fromEntries(value)
+  if (typeof value === 'object') return value
+  return {}
+}
 
 const ContactList = ({
   filteredContacts,
@@ -74,8 +83,9 @@ const ContactList = ({
             ? (contact.lastMessageAt || contact.lastMessage?.createdAt)
             : null
           const lastTimeText = lastTime ? formatRelative(lastTime) : ''
-          const unread = isConversation && contact.unreadCounts && currentUser?._id
-            ? (contact.unreadCounts[String(currentUser._id)] || 0)
+          const unreadCounts = normalizeUnreadCounts(contact.unreadCounts)
+          const unread = isConversation && currentUser?._id
+            ? (Number(unreadCounts[String(currentUser._id)] || 0))
             : 0
           const unreadText = unread > 99 ? '99+' : String(unread)
           const isPendingConversation = Boolean(contact.pending && !contact._id)
@@ -145,12 +155,11 @@ const ContactList = ({
                   )}
                 </div>
                 <span className="last-message">
-                  {contact.lastMessage?.isRecalled
-                    ? 'Tin nhắn đã được thu hồi'
-                    : (contact.lastMessage?.content ||
-                      (isPendingConversation
-                        ? 'Pending - Chưa có tin nhắn'
-                        : (!isConversation ? (contact.email || '') : 'Không có tin nhắn')))}
+                  {buildLastMessagePreview(contact.lastMessage, {
+                    isPendingConversation,
+                    isConversation,
+                    fallbackEmail: contact.email || ''
+                  })}
                 </span>
               </div>
             </div>

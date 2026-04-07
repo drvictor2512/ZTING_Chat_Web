@@ -4,7 +4,7 @@ const ConfirmPopup = ({ popup, onClose }) => {
   if (!popup?.open) return null
 
   return (
-    <div className="profile-modal" onClick={() => onClose(false)}>
+    <div className="confirm-overlay" onClick={() => onClose(false)}>
       <div className="confirm-popup" onClick={(e) => e.stopPropagation()}>
         <h3>{popup.title}</h3>
         <p>{popup.message}</p>

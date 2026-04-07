@@ -59,6 +59,36 @@ export function basenameFromUrl(str) {
     }
 }
 
+export function buildLastMessagePreview(lastMessage, { isPendingConversation = false, isConversation = true, fallbackEmail = '' } = {}) {
+    if (!lastMessage) {
+        if (isPendingConversation) return 'Pending - Chưa có tin nhắn'
+        if (!isConversation) return fallbackEmail || ''
+        return 'Không có tin nhắn'
+    }
+
+    if (lastMessage?.isRecalled) return 'Tin nhắn đã được thu hồi'
+
+    const content = String(lastMessage?.content || '').trim()
+    if (content) {
+        const matched = content.match(/^\[File\]\s*(.+)$/i)
+        if (matched?.[1]) return `[File] ${matched[1].trim()}`
+        if (/^\[Ảnh\]$/i.test(content)) return '[Ảnh]'
+        if (/^\[Video\]$/i.test(content)) return '[Video]'
+        return content
+    }
+
+    const fileUrl = String(lastMessage?.fileUrl || '').trim()
+    if (fileUrl) {
+        if (isImageUrl(fileUrl) || isGifUrl(fileUrl)) return '[Ảnh]'
+        if (isVideoUrl(fileUrl)) return '[Video]'
+        return `[File] ${basenameFromUrl(fileUrl) || 'file'}`
+    }
+
+    if (isPendingConversation) return 'Pending - Chưa có tin nhắn'
+    if (!isConversation) return fallbackEmail || ''
+    return 'Không có tin nhắn'
+}
+
 export async function downloadFile(url, filename) {
     try {
         const res = await fetch(url, { mode: 'cors' })

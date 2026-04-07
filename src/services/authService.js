@@ -87,6 +87,16 @@ const authService = {
     }
   },
 
+  // Close account
+  closeAccount: async (password) => {
+    try {
+      const response = await api.post('/auth/close-account', { password })
+      return response.data
+    } catch (error) {
+      throw error.response?.data || error.message
+    }
+  },
+
   // Get current user
   getCurrentUser: () => {
     const user = localStorage.getItem('user')

@@ -2124,6 +2124,17 @@
   text-align: left;
 }
 
+.message-group.sent-group .message-item.media-message {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  border-radius: 0;
+}
+
+.message-group.sent-group .message-item.media-message .message-time {
+  color: #888;
+}
+
 .message-content {
   display: block;
 }
@@ -2142,6 +2153,56 @@
   max-height: 400px;
   border-radius: 8px;
   margin-top: 4px;
+}
+
+.message-file-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  min-width: 220px;
+  max-width: 320px;
+}
+
+.message-file-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.message-file-icon {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #eef2ff;
+}
+
+.message-file {
+  font-size: 13px;
+  color: #111827;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-file-download {
+  background: #eef2ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 9px;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 .message-time {
@@ -2844,6 +2905,19 @@
   overflow: hidden;
 }
 
+.confirm-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3000;
+}
+
 .confirm-popup {
   width: 92%;
   max-width: 420px;
@@ -3059,7 +3133,36 @@
 .profile-actions {
   margin-top: 16px;
   display: flex;
+  justify-content: center;
   gap: 8px;
+}
+
+.profile-actions .btn-submit-danger,
+.profile-actions .btn-cancel-gray {
+  border: none;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  min-width: 92px;
+  white-space: nowrap;
+}
+
+.profile-actions .btn-submit-danger {
+  background: #f44336;
+  color: #fff;
+}
+
+.profile-actions .btn-submit-danger:hover {
+  background: #c62828;
+}
+
+.profile-actions .btn-cancel-gray {
+  background: #6b7280;
+  color: #fff;
+}
+
+.profile-actions .btn-cancel-gray:hover {
+  background: #4b5563;
 }
 
 .btn-edit {

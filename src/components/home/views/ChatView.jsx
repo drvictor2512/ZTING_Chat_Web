@@ -355,8 +355,15 @@ const ChatView = ({
                                                     {!group.isMine && (
                                                         <div className="group-sender-name">{group.senderName || 'User'}</div>
                                                     )}
-                                                    {group.messages.map(msg => (
-                                                        <div key={msg._id || msg.id || Math.random()} className="message-item">
+                                                    {group.messages.map(msg => {
+                                                        const hasAttachmentStyle = Boolean(msg.fileUrl) ||
+                                                            isGifUrl(msg.content) ||
+                                                            isImageUrl(msg.content) ||
+                                                            isVideoUrl(msg.content) ||
+                                                            isDocumentUrl(msg.content)
+
+                                                        return (
+                                                        <div key={msg._id || msg.id || Math.random()} className={`message-item ${hasAttachmentStyle ? 'media-message' : ''}`}>
                                                             {msg.isRecalled ? (
                                                                 <span className="message-content recalled">
                                                                     <em>Tin nhắn đã được thu hồi</em>
@@ -377,9 +384,12 @@ const ChatView = ({
                                                                                     </div>
                                                                                 </div>
                                                                             ) : (
-                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                                                    <span className="message-file">{basenameFromUrl(msg.fileUrl)}</span>
-                                                                                    <button onClick={() => downloadFile(msg.fileUrl, basenameFromUrl(msg.fileUrl))} title="Tải về" style={{ background: '#eef2ff', border: '1px solid #bfdbfe', color: '#1d4ed8', borderRadius: 6, fontSize: 13, fontWeight: 600, padding: '4px 8px', cursor: 'pointer' }}>⬇ Tải về</button>
+                                                                                <div className="message-file-card">
+                                                                                    <div className="message-file-main">
+                                                                                        <span className="message-file-icon">📎</span>
+                                                                                        <span className="message-file">{basenameFromUrl(msg.fileUrl)}</span>
+                                                                                    </div>
+                                                                                    <button className="message-file-download" onClick={() => downloadFile(msg.fileUrl, basenameFromUrl(msg.fileUrl))} title="Tải về">⬇ Tải về</button>
                                                                                 </div>
                                                                             )}
                                                                             {msg.content && <div style={{ marginTop: 4 }}>{msg.content}</div>}
@@ -396,9 +406,12 @@ const ChatView = ({
                                                                             </div>
                                                                         </div>
                                                                     ) : isDocumentUrl(msg.content) ? (
-                                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                                            <span className="message-file">{basenameFromUrl(msg.content)}</span>
-                                                                            <button onClick={() => downloadFile(msg.content, basenameFromUrl(msg.content))} title="Tải về" style={{ background: '#eef2ff', border: '1px solid #bfdbfe', color: '#1d4ed8', borderRadius: 6, fontSize: 13, fontWeight: 600, padding: '4px 8px', cursor: 'pointer' }}>⬇ Tải về</button>
+                                                                        <div className="message-file-card">
+                                                                            <div className="message-file-main">
+                                                                                <span className="message-file-icon">📎</span>
+                                                                                <span className="message-file">{basenameFromUrl(msg.content)}</span>
+                                                                            </div>
+                                                                            <button className="message-file-download" onClick={() => downloadFile(msg.content, basenameFromUrl(msg.content))} title="Tải về">⬇ Tải về</button>
                                                                         </div>
                                                                     ) : (
                                                                         <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</span>
@@ -435,7 +448,8 @@ const ChatView = ({
                                                                 )}
                                                             </div>
                                                         </div>
-                                                    ))}
+                                                        )
+                                                    })}
                                                 </div>
                                             </div>
                                         )
