@@ -64,9 +64,17 @@ const Home = () => {
     if (typeof value === 'string' || typeof value === 'number') return String(value)
     if (typeof value !== 'object') return ''
 
+    // Handle Mongo Extended JSON/ObjectId-like payloads from socket.
+    if (typeof value.$oid === 'string' && value.$oid) return value.$oid
+    if (typeof value.toHexString === 'function') {
+      const hex = value.toHexString()
+      if (hex) return String(hex)
+    }
+
     const candidates = [
       value._id,
       value.id,
+      value.$oid,
       value.userId,
       value.blockedUserId,
       value.targetId,
@@ -80,6 +88,11 @@ const Home = () => {
       if (normalized) return normalized
     }
 
+    try {
+      const raw = String(value)
+      if (raw && raw !== '[object Object]') return raw
+    } catch { }
+
     return ''
   }
 
@@ -87,7 +100,31 @@ const Home = () => {
     if (!value) return ''
     if (typeof value === 'string' || typeof value === 'number') return String(value)
     if (typeof value !== 'object') return ''
-    return String(value._id || value.id || '')
+
+    const direct =
+      value._id ||
+      value.id ||
+      value.$oid ||
+      value.conversationId ||
+      value.convId ||
+      null
+
+    if (direct) {
+      const normalized = normalizeUserId(direct)
+      if (normalized) return normalized
+    }
+
+    if (typeof value.toHexString === 'function') {
+      const hex = value.toHexString()
+      if (hex) return String(hex)
+    }
+
+    try {
+      const raw = String(value)
+      if (raw && raw !== '[object Object]') return raw
+    } catch { }
+
+    return ''
   }
 
   const normalizeUnreadCounts = (value) => {
@@ -682,7 +719,7 @@ const Home = () => {
             // Handle both cases: p._id (direct) and p.userId._id (populated)
             const pId = p._id || p.userId?._id
             const userId = user?._id
-            return pId !== userId
+            return String(pId || '') !== String(userId || '')
           })
           if (other) {
             participantId = other._id || other.userId?._id
@@ -2119,9 +2156,14 @@ const Home = () => {
   }
 
   const isSystemGroupMessage = (msg) => {
-    if (!msg || selectedContact?.type !== 'GROUP') return false
+    if (!msg) return false
 
-    if (msg.isSystem || msg.systemMessage) return true
+    // isSystem áp dụng cho cả DIRECT và GROUP
+    if (msg.isSystem) return true
+
+    // Fallback nhận diện theo nội dung chỉ áp dụng cho GROUP để tương thích dữ liệu cũ.
+    if (selectedContact?.type !== 'GROUP') return false
+
     const type = String(msg.type || msg.messageType || '').toUpperCase()
     if (type.includes('SYSTEM')) return true
 
