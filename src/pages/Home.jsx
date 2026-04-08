@@ -963,7 +963,7 @@ const Home = () => {
     const isFriendItem = !contact.type && !contact.participantId
     if (isFriendItem) {
       // try find existing conversation với bạn đó
-      convo = conversations.find(c => c.participantId === contact._id);
+      convo = conversations.find(c => String(c.participantId || '') === String(contact._id || ''));
       if (!convo) {
         convo = {
           _id: null,
@@ -1860,6 +1860,12 @@ const Home = () => {
           loadFriends()
         }
       }
+
+      // Backend đã tự tạo hội thoại khi kết bạn thành công -> đồng bộ ngay để click vào bạn mới mở chat được.
+      if (res?.conversation?._id) {
+        await loadConversations()
+      }
+
       toast.success('Đã chấp nhận yêu cầu kết bạn')
     } catch (err) {
       setError('Không thể chấp nhận yêu cầu kết bạn')
