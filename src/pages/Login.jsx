@@ -42,6 +42,34 @@ const Login = () => {
       }
     } catch (err) {
       const errorMsg = typeof err === 'string' ? err : err.message || 'Đăng nhập thất bại'
+
+      const isUnverifiedAccount =
+        /chưa được xác thực/i.test(errorMsg) ||
+        /xác thực otp/i.test(errorMsg)
+
+      if (isUnverifiedAccount && formData.email) {
+        try {
+          await authService.sendOTP(formData.email)
+          navigate('/register', {
+            state: {
+              verifyOnly: true,
+              presetEmail: formData.email,
+              otpResent: true
+            }
+          })
+          return
+        } catch {
+          navigate('/register', {
+            state: {
+              verifyOnly: true,
+              presetEmail: formData.email,
+              otpResent: false
+            }
+          })
+          return
+        }
+      }
+
       setError(errorMsg)
     } finally {
       setLoading(false)

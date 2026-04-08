@@ -7,7 +7,7 @@ import {
     MdEdit,
     MdEmojiEmotions,
     MdAttachFile,
-    MdVideocam,
+    MdVideoLibrary,
     MdSend,
     MdMoreVert
 } from 'react-icons/md'
@@ -273,7 +273,9 @@ const ChatView = ({
                                     )}
                                 </div>
                             </div>
-                            <MdMenu className="info-toggle" onClick={() => setShowInfoPanel(v => !v)} title="Chi tiet" />
+                            <div className="chat-header-actions">
+                                <MdMenu className="info-toggle" onClick={() => setShowInfoPanel(v => !v)} title="Chi tiet" />
+                            </div>
                         </div>
                         <div className="chat-messages">
                             {messages.length === 0 ? (
@@ -363,91 +365,91 @@ const ChatView = ({
                                                             isDocumentUrl(msg.content)
 
                                                         return (
-                                                        <div key={msg._id || msg.id || Math.random()} className={`message-item ${hasAttachmentStyle ? 'media-message' : ''}`}>
-                                                            {msg.isRecalled ? (
-                                                                <span className="message-content recalled">
-                                                                    <em>Tin nhắn đã được thu hồi</em>
-                                                                </span>
-                                                            ) : (
-                                                                <span className="message-content">
-                                                                    {msg.fileUrl ? (
-                                                                        <>
-                                                                            {isGifUrl(msg.fileUrl) ? (
-                                                                                <img src={msg.fileUrl} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.fileUrl, 'image')} />
-                                                                            ) : isImageUrl(msg.fileUrl) ? (
-                                                                                <img src={msg.fileUrl} alt="attachment" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.fileUrl, 'image')} />
-                                                                            ) : isVideoUrl(msg.fileUrl) ? (
-                                                                                <div className="message-video-preview" style={{ position: 'relative', maxWidth: '300px', borderRadius: '8px', cursor: 'pointer', overflow: 'hidden' }} onClick={() => openMediaModal(msg.fileUrl, 'video')}>
-                                                                                    <video src={msg.fileUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
-                                                                                    <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.24)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                                                        <span style={{ fontSize: 26, color: '#fff', fontWeight: 700 }}>▶</span>
+                                                            <div key={msg._id || msg.id || Math.random()} className={`message-item ${hasAttachmentStyle ? 'media-message' : ''}`}>
+                                                                {msg.isRecalled ? (
+                                                                    <span className="message-content recalled">
+                                                                        <em>Tin nhắn đã được thu hồi</em>
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="message-content">
+                                                                        {msg.fileUrl ? (
+                                                                            <>
+                                                                                {isGifUrl(msg.fileUrl) ? (
+                                                                                    <img src={msg.fileUrl} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.fileUrl, 'image')} />
+                                                                                ) : isImageUrl(msg.fileUrl) ? (
+                                                                                    <img src={msg.fileUrl} alt="attachment" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.fileUrl, 'image')} />
+                                                                                ) : isVideoUrl(msg.fileUrl) ? (
+                                                                                    <div className="message-video-preview" style={{ position: 'relative', maxWidth: '300px', borderRadius: '8px', cursor: 'pointer', overflow: 'hidden' }} onClick={() => openMediaModal(msg.fileUrl, 'video')}>
+                                                                                        <video src={msg.fileUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
+                                                                                        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.24)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                                            <span style={{ fontSize: 26, color: '#fff', fontWeight: 700 }}>▶</span>
+                                                                                        </div>
                                                                                     </div>
+                                                                                ) : (
+                                                                                    <div className="message-file-card">
+                                                                                        <div className="message-file-main">
+                                                                                            <span className="message-file-icon">📎</span>
+                                                                                            <span className="message-file">{basenameFromUrl(msg.fileUrl)}</span>
+                                                                                        </div>
+                                                                                        <button className="message-file-download" onClick={() => downloadFile(msg.fileUrl, basenameFromUrl(msg.fileUrl))} title="Tải về">⬇ Tải về</button>
+                                                                                    </div>
+                                                                                )}
+                                                                                {msg.content && <div style={{ marginTop: 4 }}>{msg.content}</div>}
+                                                                            </>
+                                                                        ) : isGifUrl(msg.content) ? (
+                                                                            <img src={msg.content} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.content, 'image')} />
+                                                                        ) : isImageUrl(msg.content) ? (
+                                                                            <img src={msg.content} alt="image" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.content, 'image')} />
+                                                                        ) : isVideoUrl(msg.content) ? (
+                                                                            <div className="message-video-preview" style={{ position: 'relative', maxWidth: '300px', borderRadius: '8px', cursor: 'pointer', overflow: 'hidden' }} onClick={() => openMediaModal(msg.content, 'video')}>
+                                                                                <video src={msg.content} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
+                                                                                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.24)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                                    <span style={{ fontSize: 26, color: '#fff', fontWeight: 700 }}>▶</span>
                                                                                 </div>
-                                                                            ) : (
-                                                                                <div className="message-file-card">
-                                                                                    <div className="message-file-main">
-                                                                                        <span className="message-file-icon">📎</span>
-                                                                                        <span className="message-file">{basenameFromUrl(msg.fileUrl)}</span>
-                                                                                    </div>
-                                                                                    <button className="message-file-download" onClick={() => downloadFile(msg.fileUrl, basenameFromUrl(msg.fileUrl))} title="Tải về">⬇ Tải về</button>
+                                                                            </div>
+                                                                        ) : isDocumentUrl(msg.content) ? (
+                                                                            <div className="message-file-card">
+                                                                                <div className="message-file-main">
+                                                                                    <span className="message-file-icon">📎</span>
+                                                                                    <span className="message-file">{basenameFromUrl(msg.content)}</span>
+                                                                                </div>
+                                                                                <button className="message-file-download" onClick={() => downloadFile(msg.content, basenameFromUrl(msg.content))} title="Tải về">⬇ Tải về</button>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</span>
+                                                                        )}
+                                                                    </span>
+                                                                )}
+                                                                <div className="message-footer">
+                                                                    {msg.createdAt && (
+                                                                        <span className="message-time">{formatTime(msg.createdAt)}</span>
+                                                                    )}
+                                                                    {group.isMine && !msg.isRecalled && (
+                                                                        <div className="message-menu-container">
+                                                                            <button
+                                                                                className="message-menu-btn"
+                                                                                onClick={() => setMessageMenuOpen(messageMenuOpen === msg._id ? null : msg._id)}
+                                                                                title="Tùy chọn"
+                                                                            >
+                                                                                <MdMoreVert size={16} />
+                                                                            </button>
+                                                                            {messageMenuOpen === msg._id && (
+                                                                                <div className="message-menu-dropdown">
+                                                                                    <button
+                                                                                        className="message-menu-item"
+                                                                                        onClick={() => {
+                                                                                            handleRecallMessage(msg._id, msg.conversationId)
+                                                                                            setMessageMenuOpen(null)
+                                                                                        }}
+                                                                                    >
+                                                                                        Thu hồi tin nhắn
+                                                                                    </button>
                                                                                 </div>
                                                                             )}
-                                                                            {msg.content && <div style={{ marginTop: 4 }}>{msg.content}</div>}
-                                                                        </>
-                                                                    ) : isGifUrl(msg.content) ? (
-                                                                        <img src={msg.content} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.content, 'image')} />
-                                                                    ) : isImageUrl(msg.content) ? (
-                                                                        <img src={msg.content} alt="image" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.content, 'image')} />
-                                                                    ) : isVideoUrl(msg.content) ? (
-                                                                        <div className="message-video-preview" style={{ position: 'relative', maxWidth: '300px', borderRadius: '8px', cursor: 'pointer', overflow: 'hidden' }} onClick={() => openMediaModal(msg.content, 'video')}>
-                                                                            <video src={msg.content} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
-                                                                            <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.24)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                                                <span style={{ fontSize: 26, color: '#fff', fontWeight: 700 }}>▶</span>
-                                                                            </div>
                                                                         </div>
-                                                                    ) : isDocumentUrl(msg.content) ? (
-                                                                        <div className="message-file-card">
-                                                                            <div className="message-file-main">
-                                                                                <span className="message-file-icon">📎</span>
-                                                                                <span className="message-file">{basenameFromUrl(msg.content)}</span>
-                                                                            </div>
-                                                                            <button className="message-file-download" onClick={() => downloadFile(msg.content, basenameFromUrl(msg.content))} title="Tải về">⬇ Tải về</button>
-                                                                        </div>
-                                                                    ) : (
-                                                                        <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</span>
                                                                     )}
-                                                                </span>
-                                                            )}
-                                                            <div className="message-footer">
-                                                                {msg.createdAt && (
-                                                                    <span className="message-time">{formatTime(msg.createdAt)}</span>
-                                                                )}
-                                                                {group.isMine && !msg.isRecalled && (
-                                                                    <div className="message-menu-container">
-                                                                        <button
-                                                                            className="message-menu-btn"
-                                                                            onClick={() => setMessageMenuOpen(messageMenuOpen === msg._id ? null : msg._id)}
-                                                                            title="Tùy chọn"
-                                                                        >
-                                                                            <MdMoreVert size={16} />
-                                                                        </button>
-                                                                        {messageMenuOpen === msg._id && (
-                                                                            <div className="message-menu-dropdown">
-                                                                                <button
-                                                                                    className="message-menu-item"
-                                                                                    onClick={() => {
-                                                                                        handleRecallMessage(msg._id, msg.conversationId)
-                                                                                        setMessageMenuOpen(null)
-                                                                                    }}
-                                                                                >
-                                                                                    Thu hồi tin nhắn
-                                                                                </button>
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                )}
+                                                                </div>
                                                             </div>
-                                                        </div>
                                                         )
                                                     })}
                                                 </div>
@@ -522,7 +524,7 @@ const ChatView = ({
                                         <MdAttachFile />
                                     </button>
                                     <button className="icon-btn video-btn" onClick={() => videoInputRef.current?.click()} title="Gửi video">
-                                        <MdVideocam />
+                                        <MdVideoLibrary />
                                     </button>
                                     <input
                                         ref={videoInputRef}

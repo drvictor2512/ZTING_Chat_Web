@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MdChat, MdContacts, MdPeople, MdGroup, MdSmartToy, MdSettings, MdPerson, MdPersonAdd, MdLink, MdEmail, MdLogout, MdEdit, MdClose, MdMenu, MdBlock, MdEmojiEmotions, MdAttachFile, MdVideocam, MdSend } from 'react-icons/md'
+import { MdChat, MdContacts, MdPeople, MdGroup, MdSmartToy, MdSettings, MdPerson, MdPersonAdd, MdLink, MdEmail, MdLogout, MdEdit, MdClose, MdMenu, MdBlock, MdEmojiEmotions, MdAttachFile, MdSend } from 'react-icons/md'
 import EmojiPicker from 'emoji-picker-react'
 import toast from 'react-hot-toast'
 import authService from '../services/authService'
@@ -2560,7 +2560,6 @@ const Home = () => {
         copyInviteSuccess={copyInviteSuccess}
         handleCopyInviteCode={handleCopyInviteCode}
       />
-
 
     </>
   )

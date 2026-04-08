@@ -1,6 +1,6 @@
 import io from 'socket.io-client'
 
-const SOCKET_URL = 'https://chatapp-backend-eiae.onrender.com'
+const SOCKET_URL = "https://chatapp-backend-eiae.onrender.com"
 
 let socket = null
 
@@ -13,10 +13,13 @@ const socketService = {
 
     socket = io(SOCKET_URL, {
       reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      reconnectionAttempts: 5,
-      transports: ['polling', 'websocket']
+      reconnectionDelay: 300,
+      reconnectionDelayMax: 2000,
+      randomizationFactor: 0.2,
+      reconnectionAttempts: Infinity,
+      timeout: 12000,
+      transports: ['websocket', 'polling'],
+      withCredentials: true
     })
 
     socket.on('connect', () => {
@@ -28,6 +31,17 @@ const socketService = {
 
     socket.on('disconnect', () => {
       console.log('Socket disconnected')
+    })
+
+    socket.on('reconnect_attempt', (attempt) => {
+      console.log('Socket reconnecting attempt:', attempt)
+    })
+
+    socket.on('reconnect', () => {
+      console.log('Socket reconnected:', socket.id)
+      if (userId) {
+        socket.emit('join', { userId })
+      }
     })
 
     socket.on('error', (error) => {

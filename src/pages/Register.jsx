@@ -1,11 +1,13 @@
-import React, { useEffect, useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import React, { useEffect, useRef, useState } from 'react'
+import { useNavigate, Link, useLocation } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import authService from '../services/authService'
 import '../styles/auth.css'
 
 const Register = () => {
   const navigate = useNavigate()
+  const location = useLocation()
+  const appliedStateRef = useRef(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [step, setStep] = useState(1) // 1 = fill info, 2 = enter OTP
@@ -25,6 +27,26 @@ const Register = () => {
       toast.error(error, { id: 'register-error-toast' })
     }
   }, [error])
+
+  useEffect(() => {
+    if (appliedStateRef.current) return
+
+    const state = location.state || {}
+    if (!state.verifyOnly || !state.presetEmail) return
+
+    appliedStateRef.current = true
+    setStep(2)
+    setFormData(prev => ({
+      ...prev,
+      email: state.presetEmail
+    }))
+
+    if (state.otpResent) {
+      toast.success('Tài khoản chưa xác thực. OTP mới đã được gửi tới email của bạn')
+    } else {
+      toast.error('Tài khoản chưa xác thực. Không thể gửi lại OTP, vui lòng thử lại')
+    }
+  }, [location.state])
 
   const handleChange = (e) => {
     const { name, value } = e.target
