@@ -370,7 +370,7 @@ const Home = () => {
         setMessages(prev => {
           const updated = prev.map(msg =>
             String(msg._id) === String(messageId)
-              ? { ...msg, isRecalled: true, content: null, fileUrl: null }
+              ? { ...msg, isRecalled: true, content: null, fileUrl: null, fileUrls: [] }
               : msg
           )
 
@@ -385,7 +385,8 @@ const Home = () => {
                       ...conv.lastMessage,
                       isRecalled: true,
                       content: null,
-                      fileUrl: null
+                      fileUrl: null,
+                      fileUrls: []
                     }
                   }
                   : conv
@@ -1480,6 +1481,7 @@ const Home = () => {
   // send a new message
   // file and emoji support
   const [pendingFile, setPendingFile] = useState(null)
+  const [pendingFiles, setPendingFiles] = useState([])
   const [uploadProgress, setUploadProgress] = useState(0)
   const [isUploadingFile, setIsUploadingFile] = useState(false)
   const fileInputRef2 = useRef(null)
@@ -1507,32 +1509,34 @@ const Home = () => {
   const [newGroupName, setNewGroupName] = useState('')
 
   const handleFileChange = e => {
-    const f = e.target.files && e.target.files[0]
-    if (!f) return
-    // Backend giới hạn 5MB → chặn sớm ở client để tránh lỗi 500
+    const selectedFiles = Array.from(e.target.files || [])
+    if (!selectedFiles.length) return
+    // Backend giới hạn 5MB mỗi file → chặn sớm ở client để tránh lỗi 500
     const maxSize = 5 * 1024 * 1024
-    if (f.size > maxSize) {
-      setError('File đính kèm tối đa 5MB. Vui lòng chọn file nhỏ hơn.')
+    const tooLargeFile = selectedFiles.find(file => file.size > maxSize)
+    if (tooLargeFile) {
+      setError(`File ${tooLargeFile.name} vượt quá 5MB. Vui lòng chọn file nhỏ hơn.`)
       e.target.value = ''
-      setPendingFile(null)
       return
     }
     setError('')
-    setPendingFile(f)
+    setPendingFiles(prev => [...prev, ...selectedFiles])
+    e.target.value = ''
   }
 
   const handleVideoFileChange = e => {
-    const f = e.target.files && e.target.files[0]
-    if (!f) return
+    const selectedFiles = Array.from(e.target.files || [])
+    if (!selectedFiles.length) return
     const maxSize = 5 * 1024 * 1024
-    if (f.size > maxSize) {
-      setError('Video tối đa 5MB. Vui lòng chọn video nhỏ hơn.')
+    const tooLargeFile = selectedFiles.find(file => file.size > maxSize)
+    if (tooLargeFile) {
+      setError(`Video ${tooLargeFile.name} vượt quá 5MB. Vui lòng chọn video nhỏ hơn.`)
       e.target.value = ''
-      setPendingFile(null)
       return
     }
     setError('')
-    setPendingFile(f)
+    setPendingFiles(prev => [...prev, ...selectedFiles])
+    e.target.value = ''
   }
 
   const handleEmojiClick = (emoji) => {
@@ -1570,8 +1574,8 @@ const Home = () => {
 
   const handleSendMessage = async () => {
     if (isUploadingFile) return
-    if ((!newMessage.trim() && !pendingFile) || !selectedContact) return
-    if (!newMessage.trim() && !pendingFile) {
+    if ((!newMessage.trim() && pendingFiles.length === 0) || !selectedContact) return
+    if (!newMessage.trim() && pendingFiles.length === 0) {
       setError('Nhập nội dung hoặc chọn file')
       return
     }
@@ -1588,13 +1592,79 @@ const Home = () => {
       return
     }
 
-    try {
-      let activeConv = selectedContact
+    const activeConv = selectedContact
+    const content = newMessage.trim()
+    const filesToSend = [...pendingFiles]
+    const fallbackContent = filesToSend.length
+      ? filesToSend.every((file) => String(file.type || '').toLowerCase().startsWith('image/'))
+        ? '[Ảnh]'
+        : filesToSend.every((file) => String(file.type || '').toLowerCase().startsWith('video/'))
+          ? '[Video]'
+          : `[File] ${filesToSend[0]?.name || 'file'}`
+      : ''
+    const contentToSend = content || fallbackContent
+    const isGroup = activeConv?.type === 'GROUP'
+    const previewUrls = filesToSend.map((file) => {
+      try {
+        return URL.createObjectURL(file)
+      } catch {
+        return null
+      }
+    }).filter(Boolean)
+    const temporaryMessageId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 
+    // Render optimistic bubble immediately so media appears in chat while uploading.
+    if (activeConv?._id) {
+      const optimisticMessage = {
+        _id: temporaryMessageId,
+        id: temporaryMessageId,
+        conversationId: activeConv._id,
+        senderId: {
+          _id: user?._id,
+          name: user?.name,
+          avatarUrl: user?.avatarUrl,
+        },
+        content: contentToSend,
+        fileUrls: previewUrls,
+        fileUrl: previewUrls[0] || null,
+        createdAt: new Date().toISOString(),
+        isUploading: filesToSend.length > 0,
+        uploadProgress: 0,
+      }
+      setMessages((prev) => [...prev, optimisticMessage])
+      setConversations((prev) => {
+        const idx = prev.findIndex((c) => String(c._id) === String(activeConv._id))
+        if (idx < 0) return prev
+        const updated = [...prev]
+        const myId = String(user?._id || '')
+        updated.splice(idx, 1)
+        updated.unshift({
+          ...prev[idx],
+          unreadCounts: {
+            ...(prev[idx].unreadCounts || {}),
+            ...(myId ? { [myId]: 0 } : {}),
+          },
+          lastMessage: optimisticMessage,
+          lastMessageAt: optimisticMessage.createdAt,
+          updatedAt: optimisticMessage.createdAt,
+        })
+        return updated
+      })
+    }
+
+    // Reset composer immediately after optimistic insert.
+    setNewMessage('')
+    setPendingFiles([])
+    setChatNotice('')
+    if (fileInputRef2.current) fileInputRef2.current.value = ''
+    if (messageInputRef.current) {
+      messageInputRef.current.style.height = 'auto'
+    }
+
+    try {
       // Create FormData matching Test_Frontend-main
       const form = new FormData()
-      const content = newMessage.trim()
-      if (content) form.append('content', content)
+      if (contentToSend) form.append('content', contentToSend)
       if (activeConv?._id) form.append('conversationId', activeConv._id)
 
       // For direct messages, append recipientId
@@ -1611,27 +1681,33 @@ const Home = () => {
         }
       }
 
-      // Append file as 'image' field
-      if (pendingFile) form.append('image', pendingFile)
+      // Append files as repeated 'image' field for backend multipart array parsing
+      filesToSend.forEach((file) => {
+        form.append('image', file)
+      })
 
-      const progressHandler = pendingFile
+      const progressHandler = filesToSend.length > 0
         ? (evt) => {
           const total = Number(evt?.total || 0)
           const loaded = Number(evt?.loaded || 0)
           if (total > 0) {
             const percent = Math.min(100, Math.max(0, Math.round((loaded * 100) / total)))
             setUploadProgress(percent)
+            setMessages((prev) => prev.map((msg) =>
+              String(msg._id) === String(temporaryMessageId)
+                ? { ...msg, isUploading: true, uploadProgress: percent }
+                : msg
+            ))
           }
         }
         : undefined
 
-      if (pendingFile) {
+      if (filesToSend.length > 0) {
         setIsUploadingFile(true)
         setUploadProgress(0)
       }
 
       // Send message
-      const isGroup = activeConv?.type === 'GROUP'
       let res = isGroup
         ? await conversationService.sendGroupMessage(form, progressHandler)
         : await conversationService.sendDirectMessage(form, progressHandler)
@@ -1639,16 +1715,15 @@ const Home = () => {
       let created = res?.message || null
       let shouldRefetchConversations = false
 
-      // Clear input and file
-      setNewMessage('')
-      setPendingFile(null)
+      previewUrls.forEach((url) => {
+        try {
+          URL.revokeObjectURL(url)
+        } catch { }
+      })
+
       setUploadProgress(0)
       setIsUploadingFile(false)
       setChatNotice('')
-      if (fileInputRef2.current) fileInputRef2.current.value = ''
-      if (messageInputRef.current) {
-        messageInputRef.current.style.height = 'auto'
-      }
 
       // Update messages if message was created
       if (created && selectedContact && String(created.conversationId) === String(selectedContact._id)) {
@@ -1673,9 +1748,10 @@ const Home = () => {
 
         // Add message to list if not already present (socket will also add it, so this prevents duplicate)
         setMessages(prev => {
-          const exists = prev.some(m => String(m._id) === String(created._id))
-          if (exists) return prev
-          return [...prev, created]
+          const withoutTemp = prev.filter((m) => String(m._id) !== String(temporaryMessageId))
+          const exists = withoutTemp.some(m => String(m._id) === String(created._id))
+          if (exists) return withoutTemp
+          return [...withoutTemp, created]
         })
 
         // Update conversation list
@@ -1719,6 +1795,14 @@ const Home = () => {
       }
     } catch (err) {
       console.error('Lỗi khi gửi tin nhắn', err)
+      previewUrls.forEach((url) => {
+        try {
+          URL.revokeObjectURL(url)
+        } catch { }
+      })
+      setMessages((prev) => prev.filter((m) => String(m._id) !== String(temporaryMessageId)))
+      setNewMessage(content)
+      setPendingFiles(filesToSend)
       setIsUploadingFile(false)
       setUploadProgress(0)
       const msg = err?.message || 'Không thể gửi tin nhắn'
@@ -1740,7 +1824,7 @@ const Home = () => {
       setMessages(prev =>
         prev.map(msg =>
           String(msg._id) === String(messageId)
-            ? { ...msg, isRecalled: true, content: null, fileUrl: null }
+            ? { ...msg, isRecalled: true, content: null, fileUrl: null, fileUrls: [] }
             : msg
         )
       )
@@ -1759,7 +1843,8 @@ const Home = () => {
                     ...conv.lastMessage,
                     isRecalled: true,
                     content: null,
-                    fileUrl: null
+                    fileUrl: null,
+                    fileUrls: []
                   }
                 }
                 : conv
@@ -2246,9 +2331,9 @@ const Home = () => {
             closeMediaModal={closeMediaModal}
             mediaModalType={mediaModalType}
             mediaModalName={mediaModalName}
-            pendingFile={pendingFile}
+            pendingFiles={pendingFiles}
             isUploadingFile={isUploadingFile}
-            setPendingFile={setPendingFile}
+            setPendingFiles={setPendingFiles}
             setUploadProgress={setUploadProgress}
             fileInputRef2={fileInputRef2}
             videoInputRef={videoInputRef}
@@ -2256,6 +2341,7 @@ const Home = () => {
             showEmojiPicker={showEmojiPicker}
             setShowEmojiPicker={setShowEmojiPicker}
             handleFileChange={handleFileChange}
+            handleVideoFileChange={handleVideoFileChange}
             newMessage={newMessage}
             setNewMessage={setNewMessage}
             handleSendMessage={handleSendMessage}

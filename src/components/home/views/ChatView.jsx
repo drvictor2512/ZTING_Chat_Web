@@ -46,9 +46,9 @@ const ChatView = ({
     closeMediaModal,
     mediaModalType,
     mediaModalName,
-    pendingFile,
+    pendingFiles,
     isUploadingFile,
-    setPendingFile,
+    setPendingFiles,
     setUploadProgress,
     fileInputRef2,
     videoInputRef,
@@ -56,6 +56,7 @@ const ChatView = ({
     showEmojiPicker,
     setShowEmojiPicker,
     handleFileChange,
+    handleVideoFileChange,
     newMessage,
     setNewMessage,
     handleSendMessage,
@@ -81,6 +82,15 @@ const ChatView = ({
     blockedUsers
 }) => {
     // Extract media and files from messages
+    const getMessageFileUrls = (msg) => {
+        const direct = Array.isArray(msg?.fileUrls) ? msg.fileUrls : []
+        const legacy = msg?.fileUrl ? [msg.fileUrl] : []
+        return [...direct, ...legacy]
+            .map((item) => String(item || '').trim())
+            .filter(Boolean)
+            .filter((url, index, arr) => arr.indexOf(url) === index)
+    }
+
     const getMediaAndFiles = () => {
         const mediaList = []
         const fileList = []
@@ -88,34 +98,44 @@ const ChatView = ({
         messages.forEach(msg => {
             if (msg.isRecalled) return
 
-            // Check fileUrl first
-            if (msg.fileUrl) {
-                if (isImageUrl(msg.fileUrl) || isGifUrl(msg.fileUrl)) {
+            const fileUrls = getMessageFileUrls(msg)
+
+            // Check file urls first
+            fileUrls.forEach((fileUrl, idx) => {
+                if (isImageUrl(fileUrl) || isGifUrl(fileUrl)) {
                     mediaList.push({
-                        id: msg._id,
-                        url: msg.fileUrl,
+                        id: `${msg._id}-${idx}`,
+                        url: fileUrl,
                         type: 'image',
                         timestamp: msg.createdAt
                     })
-                } else if (isVideoUrl(msg.fileUrl)) {
+                } else if (isVideoUrl(fileUrl)) {
                     mediaList.push({
-                        id: msg._id,
-                        url: msg.fileUrl,
+                        id: `${msg._id}-${idx}`,
+                        url: fileUrl,
                         type: 'video',
                         timestamp: msg.createdAt
                     })
-                } else if (isDocumentUrl(msg.fileUrl)) {
+                } else if (isDocumentUrl(fileUrl)) {
                     fileList.push({
-                        id: msg._id,
-                        url: msg.fileUrl,
-                        name: basenameFromUrl(msg.fileUrl),
+                        id: `${msg._id}-${idx}`,
+                        url: fileUrl,
+                        name: basenameFromUrl(fileUrl),
                         timestamp: msg.createdAt
                     })
                 }
-            }
+            })
 
             // Check content for media
             if (msg.content) {
+                const normalizedContent = String(msg.content).trim()
+                const isAttachmentPlaceholder = /^(\[(Ảnh|Video|File)\])/i.test(normalizedContent)
+                const isDuplicatedAttachmentUrl = fileUrls.includes(normalizedContent)
+
+                if (!normalizedContent || isAttachmentPlaceholder || isDuplicatedAttachmentUrl) {
+                    return
+                }
+
                 if (isImageUrl(msg.content) || isGifUrl(msg.content)) {
                     mediaList.push({
                         id: msg._id + '_content',
@@ -145,6 +165,87 @@ const ChatView = ({
     }
 
     const { mediaList, fileList } = getMediaAndFiles()
+
+    const hasMessageAttachments = (msg) => getMessageFileUrls(msg).length > 0
+
+    const renderMessageAttachments = (msg) => {
+        if (msg?.isRecalled) return null
+        const fileUrls = getMessageFileUrls(msg)
+        if (!fileUrls.length) return null
+        const uploadPercent = Number(msg?.uploadProgress || 0)
+        const showUploadOverlay = Boolean(msg?.isUploading)
+
+        const imageUrls = fileUrls.filter(url => isImageUrl(url) || isGifUrl(url))
+        const videoUrls = fileUrls.filter(url => isVideoUrl(url))
+        const docUrls = fileUrls.filter(url => !isImageUrl(url) && !isGifUrl(url) && !isVideoUrl(url))
+
+        return (
+            <div className="message-attachments-wrap">
+                {imageUrls.length > 1 ? (
+                    <div className="message-media-row">
+                        {imageUrls.map((url, index) => (
+                            <div key={`${msg._id}-img-${index}`} className="message-image-wrap">
+                                <img
+                                    src={url}
+                                    alt="attachment"
+                                    className="message-image message-image-multi"
+                                    onClick={() => openMediaModal(url, 'image')}
+                                />
+                                {showUploadOverlay && (
+                                    <div className="message-upload-overlay">
+                                        <div className="message-upload-ring" style={{ '--upload-progress': `${uploadPercent}%` }}>
+                                            <span>{uploadPercent}%</span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                ) : imageUrls.map((url, index) => (
+                    <div key={`${msg._id}-img-${index}`} className="message-image-wrap">
+                        <img
+                            src={url}
+                            alt="attachment"
+                            className="message-image"
+                            onClick={() => openMediaModal(url, 'image')}
+                        />
+                        {showUploadOverlay && (
+                            <div className="message-upload-overlay">
+                                <div className="message-upload-ring" style={{ '--upload-progress': `${uploadPercent}%` }}>
+                                    <span>{uploadPercent}%</span>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                ))}
+
+                {videoUrls.map((url, index) => (
+                    <div
+                        key={`${msg._id}-video-${index}`}
+                        className="message-video-preview"
+                        style={{ position: 'relative', maxWidth: '300px', borderRadius: '8px', cursor: 'pointer', overflow: 'hidden' }}
+                        onClick={() => openMediaModal(url, 'video')}
+                    >
+                        <video src={url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
+                        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.24)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <span style={{ fontSize: 26, color: '#fff', fontWeight: 700 }}>▶</span>
+                        </div>
+                    </div>
+                ))}
+
+                {docUrls.map((url, index) => (
+                    <div className="message-file-card" key={`${msg._id}-file-${index}`}>
+                        <div className="message-file-main">
+                            <span className="message-file-icon">📎</span>
+                            <span className="message-file">{basenameFromUrl(url)}</span>
+                        </div>
+                        <button className="message-file-download" onClick={() => downloadFile(url, basenameFromUrl(url))} title="Tải về">⬇ Tải về</button>
+                    </div>
+                ))}
+            </div>
+        )
+    }
+
     return (
         <div className="main-area chat-view">
             {conversations.length === 0 ? (
@@ -357,57 +458,37 @@ const ChatView = ({
                                                     {!group.isMine && (
                                                         <div className="group-sender-name">{group.senderName || 'User'}</div>
                                                     )}
-                                                    {group.messages.map(msg => {
-                                                        const hasAttachmentStyle = Boolean(msg.fileUrl) ||
+                                                    {group.messages.map((msg, messageIdx) => {
+                                                        const hasAttachmentStyle = hasMessageAttachments(msg) ||
                                                             isGifUrl(msg.content) ||
                                                             isImageUrl(msg.content) ||
                                                             isVideoUrl(msg.content) ||
                                                             isDocumentUrl(msg.content)
 
                                                         return (
-                                                            <div key={msg._id || msg.id || Math.random()} className={`message-item ${hasAttachmentStyle ? 'media-message' : ''}`}>
+                                                            <div key={msg._id || msg.id || `msg-${groupIdx}-${messageIdx}`} className={`message-item ${hasAttachmentStyle ? 'media-message' : ''}`}>
                                                                 {msg.isRecalled ? (
                                                                     <span className="message-content recalled">
                                                                         <em>Tin nhắn đã được thu hồi</em>
                                                                     </span>
                                                                 ) : (
                                                                     <span className="message-content">
-                                                                        {msg.fileUrl ? (
-                                                                            <>
-                                                                                {isGifUrl(msg.fileUrl) ? (
-                                                                                    <img src={msg.fileUrl} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.fileUrl, 'image')} />
-                                                                                ) : isImageUrl(msg.fileUrl) ? (
-                                                                                    <img src={msg.fileUrl} alt="attachment" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.fileUrl, 'image')} />
-                                                                                ) : isVideoUrl(msg.fileUrl) ? (
-                                                                                    <div className="message-video-preview" style={{ position: 'relative', maxWidth: '300px', borderRadius: '8px', cursor: 'pointer', overflow: 'hidden' }} onClick={() => openMediaModal(msg.fileUrl, 'video')}>
-                                                                                        <video src={msg.fileUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
-                                                                                        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.24)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                                                            <span style={{ fontSize: 26, color: '#fff', fontWeight: 700 }}>▶</span>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                ) : (
-                                                                                    <div className="message-file-card">
-                                                                                        <div className="message-file-main">
-                                                                                            <span className="message-file-icon">📎</span>
-                                                                                            <span className="message-file">{basenameFromUrl(msg.fileUrl)}</span>
-                                                                                        </div>
-                                                                                        <button className="message-file-download" onClick={() => downloadFile(msg.fileUrl, basenameFromUrl(msg.fileUrl))} title="Tải về">⬇ Tải về</button>
-                                                                                    </div>
-                                                                                )}
-                                                                                {msg.content && <div style={{ marginTop: 4 }}>{msg.content}</div>}
-                                                                            </>
-                                                                        ) : isGifUrl(msg.content) ? (
+                                                                        {hasMessageAttachments(msg) ? renderMessageAttachments(msg) : null}
+                                                                        {hasMessageAttachments(msg) && msg.content && !/^(\[(Ảnh|Video|File)\])/i.test(String(msg.content).trim()) ? (
+                                                                            <div style={{ marginTop: hasMessageAttachments(msg) ? 6 : 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</div>
+                                                                        ) : null}
+                                                                        {!hasMessageAttachments(msg) && isGifUrl(msg.content) ? (
                                                                             <img src={msg.content} alt="gif" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.content, 'image')} />
-                                                                        ) : isImageUrl(msg.content) ? (
+                                                                        ) : !hasMessageAttachments(msg) && isImageUrl(msg.content) ? (
                                                                             <img src={msg.content} alt="image" className="message-image" style={{ cursor: 'zoom-in', maxWidth: '300px', borderRadius: '8px' }} onClick={() => openMediaModal(msg.content, 'image')} />
-                                                                        ) : isVideoUrl(msg.content) ? (
+                                                                        ) : !hasMessageAttachments(msg) && isVideoUrl(msg.content) ? (
                                                                             <div className="message-video-preview" style={{ position: 'relative', maxWidth: '300px', borderRadius: '8px', cursor: 'pointer', overflow: 'hidden' }} onClick={() => openMediaModal(msg.content, 'video')}>
                                                                                 <video src={msg.content} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
                                                                                 <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.24)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                                                                     <span style={{ fontSize: 26, color: '#fff', fontWeight: 700 }}>▶</span>
                                                                                 </div>
                                                                             </div>
-                                                                        ) : isDocumentUrl(msg.content) ? (
+                                                                        ) : !hasMessageAttachments(msg) && isDocumentUrl(msg.content) ? (
                                                                             <div className="message-file-card">
                                                                                 <div className="message-file-main">
                                                                                     <span className="message-file-icon">📎</span>
@@ -416,7 +497,7 @@ const ChatView = ({
                                                                                 <button className="message-file-download" onClick={() => downloadFile(msg.content, basenameFromUrl(msg.content))} title="Tải về">⬇ Tải về</button>
                                                                             </div>
                                                                         ) : (
-                                                                            <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</span>
+                                                                            !hasMessageAttachments(msg) ? <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</span> : null
                                                                         )}
                                                                     </span>
                                                                 )}
@@ -478,21 +559,25 @@ const ChatView = ({
                         )}
 
                         <div className="chat-input">
-                            {pendingFile && (
+                            {pendingFiles.length > 0 && (
                                 <div className="chat-file-preview">
-                                    <span className="chat-file-preview-name">{pendingFile.name}</span>
-                                    <button
-                                        disabled={isUploadingFile}
-                                        onClick={() => {
-                                            setPendingFile(null)
-                                            setUploadProgress(0)
-                                            if (fileInputRef2.current) fileInputRef2.current.value = ''
-                                            if (videoInputRef.current) videoInputRef.current.value = ''
-                                        }}
-                                        className="chat-file-preview-remove"
-                                    >
-                                        ✕
-                                    </button>
+                                    <div className="chat-file-preview-list">
+                                        {pendingFiles.map((file, idx) => (
+                                            <div className="chat-file-preview-chip" key={`${file.name}-${idx}`}>
+                                                <span className="chat-file-preview-name">{file.name}</span>
+                                                <button
+                                                    disabled={isUploadingFile}
+                                                    onClick={() => {
+                                                        setPendingFiles(prev => prev.filter((_, i) => i !== idx))
+                                                        setUploadProgress(0)
+                                                    }}
+                                                    className="chat-file-preview-remove"
+                                                >
+                                                    ✕
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
                                     {isUploadingFile && (
                                         <div className="chat-upload-progress">
                                             <div className="chat-upload-progress-text">Đang tải lên: {uploadProgress}%</div>
@@ -517,6 +602,7 @@ const ChatView = ({
                                         ref={fileInputRef2}
                                         type="file"
                                         accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
+                                        multiple
                                         style={{ display: 'none' }}
                                         onChange={handleFileChange}
                                     />
@@ -530,8 +616,9 @@ const ChatView = ({
                                         ref={videoInputRef}
                                         type="file"
                                         accept="video/*"
+                                        multiple
                                         style={{ display: 'none' }}
-                                        onChange={handleFileChange}
+                                        onChange={handleVideoFileChange}
                                     />
                                 </div>
 
@@ -544,7 +631,7 @@ const ChatView = ({
                                         if (e.key === 'Enter' && !e.shiftKey) {
                                             e.preventDefault()
                                             if (isUploadingFile) return
-                                            if (!newMessage.trim() && !pendingFile) return
+                                            if (!newMessage.trim() && pendingFiles.length === 0) return
                                             await handleSendMessage()
                                         }
                                     }}
