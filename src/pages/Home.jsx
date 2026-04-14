@@ -399,18 +399,70 @@ const Home = () => {
       }
     }
 
+    const handleMessageReactionUpdated = (payload) => {
+      const updatedMessage = payload?.message
+      if (!updatedMessage?._id) return
+      const conversationId = normalizeConversationId(payload?.conversationId || updatedMessage?.conversationId)
+
+      if (selectedContact && String(selectedContact._id) === conversationId) {
+        setMessages(prev => prev.map(msg =>
+          String(msg._id) === String(updatedMessage._id)
+            ? { ...msg, ...updatedMessage }
+            : msg
+        ))
+      }
+
+      setConversations(prev => prev.map(conv => {
+        if (String(conv._id) !== String(conversationId)) return conv
+        if (String(conv?.lastMessage?._id) !== String(updatedMessage._id)) return conv
+        return {
+          ...conv,
+          lastMessage: { ...(conv.lastMessage || {}), ...updatedMessage }
+        }
+      }))
+    }
+
+    const handleMessagePinUpdated = (payload) => {
+      const updatedMessage = payload?.message
+      if (!updatedMessage?._id) return
+      const conversationId = normalizeConversationId(payload?.conversationId || updatedMessage?.conversationId)
+
+      if (selectedContact && String(selectedContact._id) === conversationId) {
+        setMessages(prev => prev.map(msg =>
+          String(msg._id) === String(updatedMessage._id)
+            ? { ...msg, ...updatedMessage }
+            : msg
+        ))
+      }
+
+      setConversations(prev => prev.map(conv => {
+        if (String(conv._id) !== String(conversationId)) return conv
+        if (String(conv?.lastMessage?._id) !== String(updatedMessage._id)) return conv
+        return {
+          ...conv,
+          lastMessage: { ...(conv.lastMessage || {}), ...updatedMessage }
+        }
+      }))
+    }
+
     const socket = socketService.getSocket()
     if (socket) {
       socket.removeAllListeners('new_message')
       socket.removeAllListeners('message_recalled')
+      socket.removeAllListeners('message_reaction_updated')
+      socket.removeAllListeners('message_pin_updated')
       socket.on('new_message', handleNewMessage)
       socket.on('message_recalled', handleMessageRecalled)
+      socket.on('message_reaction_updated', handleMessageReactionUpdated)
+      socket.on('message_pin_updated', handleMessagePinUpdated)
     }
 
     return () => {
       if (socket) {
         socket.off('new_message', handleNewMessage)
         socket.off('message_recalled', handleMessageRecalled)
+        socket.off('message_reaction_updated', handleMessageReactionUpdated)
+        socket.off('message_pin_updated', handleMessagePinUpdated)
       }
     }
   }, [selectedContact, blockedUsers, user])
@@ -1613,25 +1665,28 @@ const Home = () => {
     }).filter(Boolean)
     const temporaryMessageId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 
-    // Render optimistic bubble immediately so media appears in chat while uploading.
+    // Render optimistic bubble immediately so text/emoji/media appear right away.
+    const optimisticConversationId = activeConv?._id || `temp-conv-${Date.now()}`
+    const optimisticMessage = {
+      _id: temporaryMessageId,
+      id: temporaryMessageId,
+      conversationId: optimisticConversationId,
+      senderId: {
+        _id: user?._id,
+        name: user?.name,
+        avatarUrl: user?.avatarUrl,
+      },
+      content: contentToSend,
+      fileUrls: previewUrls,
+      fileUrl: previewUrls[0] || null,
+      createdAt: new Date().toISOString(),
+      isUploading: filesToSend.length > 0,
+      uploadProgress: 0,
+    }
+
+    setMessages((prev) => [...prev, optimisticMessage])
+
     if (activeConv?._id) {
-      const optimisticMessage = {
-        _id: temporaryMessageId,
-        id: temporaryMessageId,
-        conversationId: activeConv._id,
-        senderId: {
-          _id: user?._id,
-          name: user?.name,
-          avatarUrl: user?.avatarUrl,
-        },
-        content: contentToSend,
-        fileUrls: previewUrls,
-        fileUrl: previewUrls[0] || null,
-        createdAt: new Date().toISOString(),
-        isUploading: filesToSend.length > 0,
-        uploadProgress: 0,
-      }
-      setMessages((prev) => [...prev, optimisticMessage])
       setConversations((prev) => {
         const idx = prev.findIndex((c) => String(c._id) === String(activeConv._id))
         if (idx < 0) return prev
@@ -1855,6 +1910,64 @@ const Home = () => {
     } catch (err) {
       console.error('Lỗi khi thu hồi tin nhắn:', err)
       setError(err.message || 'Không thể thu hồi tin nhắn')
+    }
+  }
+
+  const getMyReactionEmoji = (msg) => {
+    const myId = String(user?._id || '')
+    if (!myId) return ''
+    const reactions = Array.isArray(msg?.reactions) ? msg.reactions : []
+    const mine = reactions.find((reaction) => String(reaction?.userId?._id || reaction?.userId) === myId)
+    return String(mine?.emoji || '')
+  }
+
+  const hasMyReaction = (msg, emoji) => {
+    const myEmoji = getMyReactionEmoji(msg)
+    if (!myEmoji) return false
+    if (!emoji) return true
+    return myEmoji === emoji
+  }
+
+  const handleToggleMessageReaction = async (msg, emoji = '👍') => {
+    if (!msg?._id) return
+    try {
+      const myEmoji = getMyReactionEmoji(msg)
+      const normalizedEmoji = String(emoji || '').trim() || '👍'
+
+      const response = myEmoji
+        ? (myEmoji === normalizedEmoji
+          ? await conversationService.removeMessageReaction(msg._id)
+          : await conversationService.reactToMessage(msg._id, normalizedEmoji))
+        : await conversationService.reactToMessage(msg._id, normalizedEmoji)
+
+      const updatedMessage = response?.message
+      if (!updatedMessage?._id) return
+
+      setMessages((prev) => prev.map((item) =>
+        String(item._id) === String(updatedMessage._id)
+          ? { ...item, ...updatedMessage }
+          : item
+      ))
+    } catch (err) {
+      setError(err.message || 'Không thể cập nhật reaction')
+    }
+  }
+
+  const handleToggleMessagePin = async (msg) => {
+    if (!msg?._id) return
+    try {
+      const nextPinned = !Boolean(msg?.pinnedAt)
+      const response = await conversationService.togglePinMessage(msg._id, nextPinned)
+      const updatedMessage = response?.message
+      if (!updatedMessage?._id) return
+
+      setMessages((prev) => prev.map((item) =>
+        String(item._id) === String(updatedMessage._id)
+          ? { ...item, ...updatedMessage }
+          : item
+      ))
+    } catch (err) {
+      setError(err.message || 'Không thể cập nhật ghim tin nhắn')
     }
   }
 
@@ -2363,6 +2476,9 @@ const Home = () => {
             getDirectParticipantId={getDirectParticipantId}
             blockedUsers={blockedUsers}
             handleRecallMessage={handleRecallMessage}
+            handleToggleMessageReaction={handleToggleMessageReaction}
+            handleToggleMessagePin={handleToggleMessagePin}
+            hasMyReaction={hasMyReaction}
             messageMenuOpen={messageMenuOpen}
             setMessageMenuOpen={setMessageMenuOpen}
           />

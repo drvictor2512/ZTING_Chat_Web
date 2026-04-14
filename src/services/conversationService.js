@@ -317,6 +317,42 @@ const conversationService = {
       const err = new Error(errorMessage)
       throw err
     }
+  },
+
+  reactToMessage: async (messageId, emoji) => {
+    try {
+      const response = await api.patch(`/messages/${messageId}/reaction`, { emoji })
+      return response.data
+    } catch (error) {
+      const errorData = error.response?.data
+      const errorMessage = errorData?.message || error.message || 'Không thể cập nhật reaction'
+      const err = new Error(errorMessage)
+      throw err
+    }
+  },
+
+  removeMessageReaction: async (messageId) => {
+    try {
+      const response = await api.delete(`/messages/${messageId}/reaction`)
+      return response.data
+    } catch (error) {
+      const errorData = error.response?.data
+      const errorMessage = errorData?.message || error.message || 'Không thể gỡ reaction'
+      const err = new Error(errorMessage)
+      throw err
+    }
+  },
+
+  togglePinMessage: async (messageId, isPinned) => {
+    try {
+      const response = await api.patch(`/messages/${messageId}/pin`, { isPinned })
+      return response.data
+    } catch (error) {
+      const errorData = error.response?.data
+      const errorMessage = errorData?.message || error.message || 'Không thể cập nhật ghim tin nhắn'
+      const err = new Error(errorMessage)
+      throw err
+    }
   }
 }
 

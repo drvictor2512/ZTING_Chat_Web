@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useMemo, useRef, useState } from 'react'
 import EmojiPicker from 'emoji-picker-react'
 import {
     MdGroup,
@@ -75,12 +75,92 @@ const ChatView = ({
     handleDeleteGroup,
     toggleBlock,
     handleRecallMessage,
+    handleToggleMessageReaction,
+    handleToggleMessagePin,
+    hasMyReaction,
     messageMenuOpen,
     setMessageMenuOpen,
     isBlockedUser,
     getDirectParticipantId,
     blockedUsers
 }) => {
+    const BASIC_REACTIONS = ['👍', '❤️', '😂', '😮', '😢']
+    const [pinMenuOpen, setPinMenuOpen] = useState(false)
+    const [reactHoverMessageId, setReactHoverMessageId] = useState(null)
+    const reactionHideTimerRef = useRef(null)
+    const messageRefs = useRef(new Map())
+
+    const handleReactionHoverEnter = (messageId) => {
+        if (reactionHideTimerRef.current) {
+            clearTimeout(reactionHideTimerRef.current)
+            reactionHideTimerRef.current = null
+        }
+        setReactHoverMessageId(messageId)
+    }
+
+    const handleReactionHoverLeave = (messageId) => {
+        if (reactionHideTimerRef.current) {
+            clearTimeout(reactionHideTimerRef.current)
+        }
+        reactionHideTimerRef.current = setTimeout(() => {
+            setReactHoverMessageId((prev) => (prev === messageId ? null : prev))
+            reactionHideTimerRef.current = null
+        }, 180)
+    }
+
+    const getMyReactionEmoji = (msg) => {
+        const myId = String(user?._id || '')
+        if (!myId) return ''
+        const reactions = Array.isArray(msg?.reactions) ? msg.reactions : []
+        const mine = reactions.find((reaction) => String(reaction?.userId?._id || reaction?.userId) === myId)
+        return String(mine?.emoji || '')
+    }
+
+    const summarizeReactions = (msg) => {
+        const reactions = Array.isArray(msg?.reactions) ? msg.reactions : []
+        if (!reactions.length) return ''
+
+        const grouped = new Map()
+        reactions.forEach((reaction) => {
+            const emoji = String(reaction?.emoji || '').trim()
+            if (!emoji) return
+            grouped.set(emoji, (grouped.get(emoji) || 0) + 1)
+        })
+
+        if (!grouped.size) return ''
+        return Array.from(grouped.entries())
+            .map(([emoji, count]) => `${emoji} ${count}`)
+            .join('   ')
+    }
+
+    const pinnedMessage = useMemo(() => {
+        const pinned = (messages || []).filter((msg) => Boolean(msg?.pinnedAt))
+        if (!pinned.length) return null
+
+        return [...pinned].sort((a, b) =>
+            new Date(b.pinnedAt || 0).getTime() - new Date(a.pinnedAt || 0).getTime()
+        )[0]
+    }, [messages])
+
+    const getPinnedPreview = (msg) => {
+        if (!msg) return ''
+        const text = String(msg.content || '').trim()
+        if (text) return text
+
+        const fileUrls = getMessageFileUrls(msg)
+        if (!fileUrls.length) return 'Tin nhắn đính kèm'
+        if (fileUrls.every((url) => isImageUrl(url) || isGifUrl(url))) return '[Ảnh]'
+        if (fileUrls.every((url) => isVideoUrl(url))) return '[Video]'
+        return '[File]'
+    }
+
+    const scrollToPinnedMessage = () => {
+        if (!pinnedMessage?._id) return
+        const node = messageRefs.current.get(String(pinnedMessage._id))
+        if (!node) return
+        node.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+
     // Extract media and files from messages
     const getMessageFileUrls = (msg) => {
         const direct = Array.isArray(msg?.fileUrls) ? msg.fileUrls : []
@@ -378,6 +458,40 @@ const ChatView = ({
                                 <MdMenu className="info-toggle" onClick={() => setShowInfoPanel(v => !v)} title="Chi tiet" />
                             </div>
                         </div>
+
+                        {pinnedMessage ? (
+                            <div className="chat-pinned-bar">
+                                <button className="chat-pinned-main chat-pinned-jump" onClick={scrollToPinnedMessage}>
+                                    <span className="chat-pinned-icon">📌</span>
+                                    <span className="chat-pinned-text" title={getPinnedPreview(pinnedMessage)}>
+                                        {getPinnedPreview(pinnedMessage)}
+                                    </span>
+                                </button>
+                                <div className="chat-pinned-actions">
+                                    <button
+                                        className="chat-pinned-menu-btn"
+                                        title="Tùy chọn ghim"
+                                        onClick={() => setPinMenuOpen((prev) => !prev)}
+                                    >
+                                        <MdMoreVert size={18} />
+                                    </button>
+                                    {pinMenuOpen ? (
+                                        <div className="chat-pinned-menu-dropdown">
+                                            <button
+                                                className="message-menu-item"
+                                                onClick={() => {
+                                                    handleToggleMessagePin(pinnedMessage)
+                                                    setPinMenuOpen(false)
+                                                }}
+                                            >
+                                                Bỏ ghim
+                                            </button>
+                                        </div>
+                                    ) : null}
+                                </div>
+                            </div>
+                        ) : null}
+
                         <div className="chat-messages">
                             {messages.length === 0 ? (
                                 <p className="no-messages">Bạn chưa có tin nhắn nào. Hãy gửi tin nhắn để bắt đầu cuộc trò chuyện!</p>
@@ -466,7 +580,16 @@ const ChatView = ({
                                                             isDocumentUrl(msg.content)
 
                                                         return (
-                                                            <div key={msg._id || msg.id || `msg-${groupIdx}-${messageIdx}`} className={`message-item ${hasAttachmentStyle ? 'media-message' : ''}`}>
+                                                            <div
+                                                                key={msg._id || msg.id || `msg-${groupIdx}-${messageIdx}`}
+                                                                className={`message-item ${hasAttachmentStyle ? 'media-message' : ''}`}
+                                                                ref={(node) => {
+                                                                    const id = String(msg._id || msg.id || '')
+                                                                    if (!id) return
+                                                                    if (node) messageRefs.current.set(id, node)
+                                                                    else messageRefs.current.delete(id)
+                                                                }}
+                                                            >
                                                                 {msg.isRecalled ? (
                                                                     <span className="message-content recalled">
                                                                         <em>Tin nhắn đã được thu hồi</em>
@@ -505,7 +628,10 @@ const ChatView = ({
                                                                     {msg.createdAt && (
                                                                         <span className="message-time">{formatTime(msg.createdAt)}</span>
                                                                     )}
-                                                                    {group.isMine && !msg.isRecalled && (
+                                                                    {msg.pinnedAt && (
+                                                                        <span className="message-time" style={{ marginLeft: 6 }}>📌</span>
+                                                                    )}
+                                                                    {!msg.isRecalled && (
                                                                         <div className="message-menu-container">
                                                                             <button
                                                                                 className="message-menu-btn"
@@ -519,17 +645,73 @@ const ChatView = ({
                                                                                     <button
                                                                                         className="message-menu-item"
                                                                                         onClick={() => {
-                                                                                            handleRecallMessage(msg._id, msg.conversationId)
+                                                                                            handleToggleMessagePin(msg)
                                                                                             setMessageMenuOpen(null)
                                                                                         }}
                                                                                     >
-                                                                                        Thu hồi tin nhắn
+                                                                                        {msg.pinnedAt ? 'Bỏ ghim tin nhắn' : 'Ghim tin nhắn'}
                                                                                     </button>
+                                                                                    {group.isMine ? (
+                                                                                        <button
+                                                                                            className="message-menu-item"
+                                                                                            onClick={() => {
+                                                                                                handleRecallMessage(msg._id, msg.conversationId)
+                                                                                                setMessageMenuOpen(null)
+                                                                                            }}
+                                                                                        >
+                                                                                            Thu hồi tin nhắn
+                                                                                        </button>
+                                                                                    ) : null}
                                                                                 </div>
                                                                             )}
                                                                         </div>
                                                                     )}
+
+                                                                    {!msg.isRecalled ? (
+                                                                        <div
+                                                                            className="message-reaction-actions"
+                                                                            onMouseEnter={() => handleReactionHoverEnter(msg._id)}
+                                                                            onMouseLeave={() => handleReactionHoverLeave(msg._id)}
+                                                                        >
+                                                                            <button
+                                                                                className={`message-react-icon ${hasMyReaction(msg) ? 'active' : ''}`}
+                                                                                title="Thả cảm xúc"
+                                                                                onClick={() => handleToggleMessageReaction(msg, '👍')}
+                                                                            >
+                                                                                👍
+                                                                            </button>
+
+                                                                            {reactHoverMessageId === msg._id ? (
+                                                                                <div
+                                                                                    className="message-react-picker"
+                                                                                    onMouseEnter={() => handleReactionHoverEnter(msg._id)}
+                                                                                    onMouseLeave={() => handleReactionHoverLeave(msg._id)}
+                                                                                >
+                                                                                    {BASIC_REACTIONS.map((emoji) => (
+                                                                                        <button
+                                                                                            key={`${msg._id}-${emoji}`}
+                                                                                            className={`message-react-emoji ${getMyReactionEmoji(msg) === emoji ? 'active' : ''}`}
+                                                                                            onClick={() => {
+                                                                                                handleToggleMessageReaction(msg, emoji)
+                                                                                                setReactHoverMessageId(null)
+                                                                                            }}
+                                                                                        >
+                                                                                            {emoji}
+                                                                                        </button>
+                                                                                    ))}
+                                                                                </div>
+                                                                            ) : null}
+                                                                        </div>
+                                                                    ) : null}
                                                                 </div>
+
+                                                                {summarizeReactions(msg) ? (
+                                                                    <div style={{ marginTop: 4 }}>
+                                                                        <span className="message-time" style={{ fontSize: 11, color: '#4b5563' }}>
+                                                                            {summarizeReactions(msg)}
+                                                                        </span>
+                                                                    </div>
+                                                                ) : null}
                                                             </div>
                                                         )
                                                     })}
