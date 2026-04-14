@@ -54,7 +54,9 @@ const conversationService = {
   // Get messages in a conversation
   getMessages: async (conversationId) => {
     try {
-      const response = await api.get(`/conversations/${conversationId}/messages`)
+      const response = await api.get(`/conversations/${conversationId}/messages`, {
+        params: { limit: 30 }
+      })
       return response.data
     } catch (error) {
       throw error.response?.data || error.message
