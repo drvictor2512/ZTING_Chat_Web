@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import EmojiPicker from 'emoji-picker-react'
 import {
     MdGroup,
@@ -92,10 +92,15 @@ const ChatView = ({
     setReplyingTo,
     showForwardPopup,
     setShowForwardPopup,
-    setMessageToForward
+    setMessageToForward,
+    isDirectChatBlocked,
+    directChatBlockedReason,
+    isDirectBlockedByMe,
+    isDirectBlockedByPeer
 }) => {
     const BASIC_REACTIONS = ['👍', '❤️', '😂', '😮', '😢']
     const [pinMenuOpen, setPinMenuOpen] = useState(false)
+    const [pinListOpen, setPinListOpen] = useState(false)
     const [reactHoverMessageId, setReactHoverMessageId] = useState(null)
     const reactionHideTimerRef = useRef(null)
     const messageRefs = useRef(new Map())
@@ -143,14 +148,20 @@ const ChatView = ({
             .join('   ')
     }
 
-    const pinnedMessage = useMemo(() => {
+    const pinnedMessages = useMemo(() => {
         const pinned = (messages || []).filter((msg) => Boolean(msg?.pinnedAt))
-        if (!pinned.length) return null
-
         return [...pinned].sort((a, b) =>
             new Date(b.pinnedAt || 0).getTime() - new Date(a.pinnedAt || 0).getTime()
-        )[0]
+        )
     }, [messages])
+
+    const primaryPinnedMessage = pinnedMessages[0] || null
+    const pinnedCount = pinnedMessages.length
+
+    useEffect(() => {
+        setPinMenuOpen(false)
+        setPinListOpen(false)
+    }, [selectedContact?._id])
 
     const getPinnedPreview = (msg) => {
         if (!msg) return ''
@@ -164,12 +175,16 @@ const ChatView = ({
         return '[File]'
     }
 
-    const scrollToPinnedMessage = () => {
-        if (!pinnedMessage?._id) return
-        const node = messageRefs.current.get(String(pinnedMessage._id))
+    const scrollToPinnedMessage = (messageId) => {
+        if (!messageId) return
+        const node = messageRefs.current.get(String(messageId))
         if (!node) return
         node.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
+
+    const composerDisabled = Boolean(
+        isUploadingFile || (selectedContact?.type === 'DIRECT' && isDirectChatBlocked)
+    )
 
     // Extract media and files from messages
     const getMessageFileUrls = (msg) => {
@@ -469,15 +484,27 @@ const ChatView = ({
                             </div>
                         </div>
 
-                        {pinnedMessage ? (
+                        {primaryPinnedMessage ? (
                             <div className="chat-pinned-bar">
-                                <button className="chat-pinned-main chat-pinned-jump" onClick={scrollToPinnedMessage}>
+                                <button
+                                    className="chat-pinned-main chat-pinned-jump"
+                                    onClick={() => scrollToPinnedMessage(primaryPinnedMessage._id)}
+                                >
                                     <span className="chat-pinned-icon">📌</span>
-                                    <span className="chat-pinned-text" title={getPinnedPreview(pinnedMessage)}>
-                                        {getPinnedPreview(pinnedMessage)}
+                                    <span className="chat-pinned-text" title={getPinnedPreview(primaryPinnedMessage)}>
+                                        {getPinnedPreview(primaryPinnedMessage)}
                                     </span>
                                 </button>
                                 <div className="chat-pinned-actions">
+                                    {pinnedCount > 1 ? (
+                                        <button
+                                            className="chat-pinned-count-btn"
+                                            title="Xem danh sách ghim"
+                                            onClick={() => setPinListOpen((prev) => !prev)}
+                                        >
+                                            +{pinnedCount - 1} ghim
+                                        </button>
+                                    ) : null}
                                     <button
                                         className="chat-pinned-menu-btn"
                                         title="Tùy chọn ghim"
@@ -490,7 +517,7 @@ const ChatView = ({
                                             <button
                                                 className="message-menu-item"
                                                 onClick={() => {
-                                                    handleToggleMessagePin(pinnedMessage)
+                                                    handleToggleMessagePin(primaryPinnedMessage)
                                                     setPinMenuOpen(false)
                                                 }}
                                             >
@@ -498,6 +525,34 @@ const ChatView = ({
                                             </button>
                                         </div>
                                     ) : null}
+                                </div>
+                            </div>
+                        ) : null}
+
+                        {pinListOpen && pinnedMessages.length > 0 ? (
+                            <div className="chat-pinned-list-panel">
+                                <div className="chat-pinned-list-header">
+                                    Danh sách ghim ({pinnedCount})
+                                </div>
+                                <div className="chat-pinned-list-body">
+                                    {pinnedMessages.map((msg) => (
+                                        <div className="chat-pinned-list-item" key={msg._id}>
+                                            <button
+                                                className="chat-pinned-list-jump"
+                                                title={getPinnedPreview(msg)}
+                                                onClick={() => scrollToPinnedMessage(msg._id)}
+                                            >
+                                                <span className="chat-pinned-list-title">Tin nhắn</span>
+                                                <span className="chat-pinned-list-preview">{getPinnedPreview(msg)}</span>
+                                            </button>
+                                            <button
+                                                className="chat-pinned-list-unpin"
+                                                onClick={() => handleToggleMessagePin(msg)}
+                                            >
+                                                Bỏ ghim
+                                            </button>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
                         ) : null}
@@ -870,6 +925,12 @@ const ChatView = ({
                                     </button>
                                 </div>
                             )}
+                            {selectedContact?.type === 'DIRECT' && isDirectChatBlocked ? (
+                                <div className="chat-input-blocked-notice">
+                                    {directChatBlockedReason || 'Bạn không thể gửi tin nhắn trong cuộc trò chuyện này.'}
+                                </div>
+                            ) : null}
+
                             {pendingFiles.length > 0 && (
                                 <div className="chat-file-preview">
                                     <div className="chat-file-preview-list">
@@ -877,7 +938,7 @@ const ChatView = ({
                                             <div className="chat-file-preview-chip" key={`${file.name}-${idx}`}>
                                                 <span className="chat-file-preview-name">{file.name}</span>
                                                 <button
-                                                    disabled={isUploadingFile}
+                                                    disabled={composerDisabled}
                                                     onClick={() => {
                                                         setPendingFiles(prev => prev.filter((_, i) => i !== idx))
                                                         setUploadProgress(0)
@@ -905,6 +966,7 @@ const ChatView = ({
                                     <button
                                         className="icon-btn emoji-btn"
                                         title="Emoji"
+                                        disabled={composerDisabled}
                                         onClick={() => setShowEmojiPicker(!showEmojiPicker)}
                                     >
                                         <MdEmojiEmotions />
@@ -915,12 +977,13 @@ const ChatView = ({
                                         accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
                                         multiple
                                         style={{ display: 'none' }}
+                                        disabled={composerDisabled}
                                         onChange={handleFileChange}
                                     />
-                                    <button className="icon-btn attach-btn" onClick={() => fileInputRef2.current?.click()} title="Đính kèm">
+                                    <button className="icon-btn attach-btn" disabled={composerDisabled} onClick={() => fileInputRef2.current?.click()} title="Đính kèm">
                                         <MdAttachFile />
                                     </button>
-                                    <button className="icon-btn video-btn" onClick={() => videoInputRef.current?.click()} title="Gửi video">
+                                    <button className="icon-btn video-btn" disabled={composerDisabled} onClick={() => videoInputRef.current?.click()} title="Gửi video">
                                         <MdVideoLibrary />
                                     </button>
                                     <input
@@ -929,6 +992,7 @@ const ChatView = ({
                                         accept="video/*"
                                         multiple
                                         style={{ display: 'none' }}
+                                        disabled={composerDisabled}
                                         onChange={handleVideoFileChange}
                                     />
                                 </div>
@@ -937,18 +1001,19 @@ const ChatView = ({
                                     className="chat-text-input"
                                     value={newMessage}
                                     onChange={e => setNewMessage(e.target.value)}
-                                    placeholder="Nhập tin nhắn..."
+                                    placeholder={composerDisabled ? 'Không thể nhắn tin trong cuộc trò chuyện này' : 'Nhập tin nhắn...'}
+                                    disabled={composerDisabled}
                                     onKeyDown={async e => {
                                         if (e.key === 'Enter' && !e.shiftKey) {
                                             e.preventDefault()
-                                            if (isUploadingFile) return
+                                            if (composerDisabled) return
                                             if (!newMessage.trim() && pendingFiles.length === 0) return
                                             await handleSendMessage()
                                         }
                                     }}
                                 />
 
-                                <button className="chat-send-button" onClick={handleSendMessage} disabled={isUploadingFile}>
+                                <button className="chat-send-button" onClick={handleSendMessage} disabled={composerDisabled}>
                                     <MdSend /> {isUploadingFile ? `Đang tải ${uploadProgress}%` : 'Gửi'}
                                 </button>
                             </div>
@@ -1178,9 +1243,15 @@ const ChatView = ({
                                                 const blocked = directContactId
                                                     ? (isBlockedUser?.(directContactId) || blockedUsers.includes(directContactId))
                                                     : false
+                                                const disableBlockButton = Boolean(isDirectBlockedByPeer) && !Boolean(isDirectBlockedByMe)
                                                 return (
-                                                    <button className="btn-block" onClick={toggleBlock}>
-                                                        {blocked ? 'Bỏ chặn' : 'Chặn'}
+                                                    <button
+                                                        className="btn-block"
+                                                        onClick={toggleBlock}
+                                                        disabled={disableBlockButton}
+                                                        title={disableBlockButton ? 'Bạn đã bị chặn bởi người này' : ''}
+                                                    >
+                                                        {disableBlockButton ? 'Đã bị chặn' : (blocked ? 'Bỏ chặn' : 'Chặn')}
                                                     </button>
                                                 )
                                             })()}
