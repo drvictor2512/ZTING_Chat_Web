@@ -304,6 +304,12 @@
   font-size: 14px;
 }
 
+.chat-text-input:disabled {
+  background: #f1f5f9;
+  color: #64748b;
+  cursor: not-allowed;
+}
+
 .chat-send-button {
   flex: 0 0 auto;
   min-width: 80px;
@@ -326,6 +332,11 @@
   background: #0028cc;
 }
 
+.chat-send-button:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+
 .chat-input .icon-btn {
   flex-shrink: 0;
   width: 50px;
@@ -344,6 +355,21 @@
 
 .chat-input .icon-btn:hover {
   transform: scale(1.05);
+}
+
+.chat-input .icon-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.chat-input-blocked-notice {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+  font-size: 13px;
 }
 
 .chat-input .emoji-btn {
@@ -2015,6 +2041,22 @@
   color: #334155;
 }
 
+.chat-pinned-count-btn {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #1e40af;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-right: 6px;
+}
+
+.chat-pinned-count-btn:hover {
+  background: #eff6ff;
+}
+
 .chat-pinned-menu-dropdown {
   position: absolute;
   top: calc(100% + 4px);
@@ -2026,6 +2068,72 @@
   z-index: 1000;
   min-width: 120px;
   overflow: hidden;
+}
+
+.chat-pinned-list-panel {
+  border-bottom: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+.chat-pinned-list-header {
+  padding: 10px 14px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.chat-pinned-list-body {
+  max-height: 210px;
+  overflow-y: auto;
+}
+
+.chat-pinned-list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.chat-pinned-list-jump {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.chat-pinned-list-title {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.chat-pinned-list-preview {
+  font-size: 13px;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+}
+
+.chat-pinned-list-unpin {
+  border: none;
+  background: #f1f5f9;
+  color: #1e293b;
+  border-radius: 8px;
+  padding: 5px 9px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chat-pinned-list-unpin:hover {
+  background: #e2e8f0;
 }
 
 .chat-messages {

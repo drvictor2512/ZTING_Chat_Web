@@ -1,5 +1,5 @@
 import React from 'react'
-import { MdPersonAdd, MdChat, MdGroup, MdEmail, MdContacts } from 'react-icons/md'
+import { MdPersonAdd, MdChat, MdGroup, MdContacts } from 'react-icons/md'
 
 const FriendsView = ({
     friendsView,
@@ -209,16 +209,6 @@ const FriendsView = ({
                             </>
                         )
                     })()}
-                </div>
-            ) : friendsView === 'group-invites' ? (
-                <div className="friends-detail-view">
-                    <div className="fl-page-header">
-                        <MdEmail className="fl-page-icon" />
-                        <h2 className="fl-page-title">Lời mời vào nhóm và cộng đồng</h2>
-                    </div>
-                    <div className="empty-state">
-                        <p>Chưa có lời mời nào</p>
-                    </div>
                 </div>
             ) : (
                 <div className="friends-detail-view">

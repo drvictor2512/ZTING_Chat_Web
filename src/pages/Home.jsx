@@ -55,6 +55,7 @@ const Home = () => {
   const [messageMenuOpen, setMessageMenuOpen] = useState(null)
   const [showInfoPanel, setShowInfoPanel] = useState(false)
   const [blockedUsers, setBlockedUsers] = useState([])
+  const [directChatBlockedNotice, setDirectChatBlockedNotice] = useState('')
   const [onlineStatus, setOnlineStatus] = useState({}) // { userId: { status: 'online'|'offline', lastSeen: timestamp } }
   const messagesEndRef = useRef(null)
   const messageInputRef = useRef(null)
@@ -161,6 +162,38 @@ const Home = () => {
     if (!targetId) return false
     return blockedUsers.some(id => normalizeUserId(id) === targetId)
   }
+
+  const loadDirectBlockStatus = async (contact = selectedContact) => {
+    if (!contact || contact.type !== 'DIRECT') {
+      setDirectChatBlockedNotice('')
+      return
+    }
+
+    const targetId = getDirectParticipantId(contact)
+    if (!targetId) {
+      setDirectChatBlockedNotice('')
+      return
+    }
+
+    try {
+      const status = await userService.getBlockStatus(targetId)
+      const blockedByTarget = Boolean(status?.blockedByTarget)
+      setDirectChatBlockedNotice(blockedByTarget ? 'Bạn đã bị chặn bởi người này.' : '')
+    } catch (err) {
+      console.error('cannot load direct block status', err)
+      setDirectChatBlockedNotice('')
+    }
+  }
+
+  const directParticipantId = selectedContact?.type === 'DIRECT'
+    ? getDirectParticipantId(selectedContact)
+    : ''
+  const directBlockedByMe = Boolean(directParticipantId) && isBlockedUser(directParticipantId)
+  const directBlockedByPeer = selectedContact?.type === 'DIRECT' && Boolean(directChatBlockedNotice)
+  const isDirectChatBlocked = selectedContact?.type === 'DIRECT' && (directBlockedByMe || directBlockedByPeer)
+  const directChatBlockedReason = directBlockedByMe
+    ? 'Bạn đã chặn người này. Bỏ chặn để tiếp tục nhắn tin.'
+    : directChatBlockedNotice
 
   // load list of users blocked by current user
   const loadBlockedUsers = async () => {
@@ -1048,6 +1081,7 @@ const Home = () => {
 
   // Handle contact click (conversation or friend)
   const handleContactClick = async (contact) => {
+    setDirectChatBlockedNotice('')
     let convo = contact;
     // Chỉ khi click từ danh sách bạn bè (friend không có type) mới tự tạo cuộc trò chuyện DIRECT.
     const isFriendItem = !contact.type && !contact.participantId
@@ -1099,6 +1133,10 @@ const Home = () => {
       } catch (err) {
         console.error('Không thể đánh dấu đã đọc', err)
       }
+    }
+
+    if ((convo?.type === 'DIRECT') || (!convo?.type && convo?.participantId)) {
+      await loadDirectBlockStatus(convo)
     }
   }
 
@@ -1156,6 +1194,15 @@ const Home = () => {
     }
   }, [selectedContact, currentView, blockedUsers])
 
+  useEffect(() => {
+    if (currentView !== 'chat' || !selectedContact || selectedContact.type !== 'DIRECT') {
+      setDirectChatBlockedNotice('')
+      return
+    }
+
+    loadDirectBlockStatus(selectedContact)
+  }, [currentView, selectedContact, blockedUsers])
+
   // Keep selected conversation metadata (name/avatar/status fields) in sync after reloads.
   useEffect(() => {
     if (!selectedContact?._id || selectedContact.type === 'GROUP') return
@@ -1200,6 +1247,7 @@ const Home = () => {
       if (isCurrentlyBlocked) {
         // Optimistically update UI before API call
         setBlockedUsers(prev => prev.filter(id => normalizeUserId(id) !== targetUserId))
+        setDirectChatBlockedNotice('')
         await userService.unblockUser(targetUserId)
         toast.success(`Đã bỏ chặn ${selectedContact.participantName || selectedContact.name}`)
       } else {
@@ -1208,6 +1256,7 @@ const Home = () => {
           if (prev.some(id => normalizeUserId(id) === targetUserId)) return prev
           return [...prev, targetUserId]
         })
+        setDirectChatBlockedNotice('Bạn đã chặn người này. Bỏ chặn để tiếp tục nhắn tin.')
         await userService.blockUser(targetUserId)
         toast.success(`Đã chặn ${selectedContact.participantName || selectedContact.name}`)
       }
@@ -1638,9 +1687,11 @@ const Home = () => {
       return
     }
 
-    // Guard: if recipient is blocked, prevent sending message
-    if (selectedContact?.type === 'DIRECT' && isBlockedUser(getDirectParticipantId(selectedContact))) {
-      toast.error('Không thể gửi tin nhắn đến người dùng đã bị chặn')
+    // Guard: if direct conversation is blocked, disable sending immediately.
+    if (isDirectChatBlocked) {
+      if (directChatBlockedReason) {
+        toast.error(directChatBlockedReason)
+      }
       return
     }
 
@@ -1779,6 +1830,7 @@ const Home = () => {
       setUploadProgress(0)
       setIsUploadingFile(false)
       setChatNotice('')
+      setDirectChatBlockedNotice('')
 
       // Update messages if message was created
       if (created && selectedContact && String(created.conversationId) === String(selectedContact._id)) {
@@ -1864,6 +1916,10 @@ const Home = () => {
       const lower = String(msg).toLowerCase()
       if (lower.includes('không phải thành viên') || lower.includes('not member')) {
         setChatNotice('Bạn không phải thành viên nhóm')
+      } else if (lower.includes('bị chặn bởi người này')) {
+        setDirectChatBlockedNotice('Bạn đã bị chặn bởi người này.')
+      } else if (lower.includes('đã chặn người này') || lower.includes('bỏ chặn để gửi tin nhắn')) {
+        setDirectChatBlockedNotice('Bạn đã chặn người này. Bỏ chặn để tiếp tục nhắn tin.')
       } else {
         setError(msg)
       }
@@ -2481,6 +2537,10 @@ const Home = () => {
             hasMyReaction={hasMyReaction}
             messageMenuOpen={messageMenuOpen}
             setMessageMenuOpen={setMessageMenuOpen}
+            isDirectChatBlocked={isDirectChatBlocked}
+            directChatBlockedReason={directChatBlockedReason}
+            isDirectBlockedByMe={directBlockedByMe}
+            isDirectBlockedByPeer={directBlockedByPeer}
           />
         )
 

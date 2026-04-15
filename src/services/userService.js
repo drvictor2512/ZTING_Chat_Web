@@ -95,6 +95,15 @@ const userService = {
     } catch (error) {
       throw error.response?.data || error.message
     }
+  },
+
+  getBlockStatus: async (userId) => {
+    try {
+      const response = await api.get(`/user/block-status/${userId}`)
+      return response.data
+    } catch (error) {
+      throw error.response?.data || error.message
+    }
   }
 }
 

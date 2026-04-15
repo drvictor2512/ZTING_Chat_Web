@@ -1,5 +1,5 @@
 import React from 'react'
-import { MdContacts, MdGroup, MdPersonAdd, MdEmail } from 'react-icons/md'
+import { MdContacts, MdGroup, MdPersonAdd } from 'react-icons/md'
 
 const FriendsNav = ({ friendsView, friendRequestCount, onChangeView, onOpenFriendRequests }) => {
   return (
@@ -30,13 +30,6 @@ const FriendsNav = ({ friendsView, friendRequestCount, onChangeView, onOpenFrien
         {friendRequestCount > 0 && (
           <span className="friends-nav-badge">{friendRequestCount}</span>
         )}
-      </div>
-      <div
-        className={`friends-nav-item ${friendsView === 'group-invites' ? 'active' : ''}`}
-        onClick={() => onChangeView('group-invites')}
-      >
-        <MdEmail className="friends-nav-icon" />
-        <span>Lời mời vào nhóm và cộng đồng</span>
       </div>
     </nav>
   )
