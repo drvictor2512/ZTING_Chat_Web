@@ -242,7 +242,7 @@ const conversationService = {
   },
 
   // Send a message (direct or group)
-  sendMessage: async ({ conversationId, recipientId, content, isGroup = false, file, onUploadProgress }) => {
+  sendMessage: async ({ conversationId, recipientId, content, isGroup = false, file, replyToMessageId, onUploadProgress }) => {
     try {
       const formData = new FormData()
       const text = typeof content === 'string' ? content.trim() : ''
@@ -258,6 +258,7 @@ const conversationService = {
       if (recipientId) formData.append('recipientId', recipientId)
       if (conversationId) formData.append('conversationId', conversationId)
       if (text || fallbackContent) formData.append('content', text || fallbackContent)
+      if (replyToMessageId) formData.append('replyToMessageId', replyToMessageId)
       if (file) {
         // nhận 'file' → gửi cả hai để tương thích.
         formData.append('file', file)
@@ -271,6 +272,23 @@ const conversationService = {
     } catch (error) {
       const errorData = error.response?.data
       const errorMessage = errorData?.message || error.message || 'Không thể gửi tin nhắn'
+      const err = new Error(errorMessage)
+      throw err
+    }
+  },
+
+  // Forward message to multiple conversations/users
+  forwardMessage: async ({ messageId, targetConversationIds = [], targetUserIds = [] }) => {
+    try {
+      const response = await api.post('/messages/forward', {
+        messageId,
+        targetConversationIds,
+        targetUserIds
+      })
+      return response.data
+    } catch (error) {
+      const errorData = error.response?.data
+      const errorMessage = errorData?.message || error.message || 'Không thể chuyển tiếp tin nhắn'
       const err = new Error(errorMessage)
       throw err
     }

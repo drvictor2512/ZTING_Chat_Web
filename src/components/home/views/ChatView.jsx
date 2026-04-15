@@ -9,7 +9,10 @@ import {
     MdAttachFile,
     MdVideoLibrary,
     MdSend,
-    MdMoreVert
+    MdMoreVert,
+    MdReply,
+    MdForward,
+    MdClose
 } from 'react-icons/md'
 
 const ChatView = ({
@@ -83,6 +86,13 @@ const ChatView = ({
     isBlockedUser,
     getDirectParticipantId,
     blockedUsers,
+    handleReplyMessage,
+    handleForwardMessage,
+    replyingTo,
+    setReplyingTo,
+    showForwardPopup,
+    setShowForwardPopup,
+    setMessageToForward,
     isDirectChatBlocked,
     directChatBlockedReason,
     isDirectBlockedByMe,
@@ -651,6 +661,54 @@ const ChatView = ({
                                                                     </span>
                                                                 ) : (
                                                                     <span className="message-content">
+                                                                        {/* Reply preview */}
+                                                                        {msg.replyTo && (
+                                                                            <div className="message-reply-preview">
+                                                                                <div className="reply-preview-bar"></div>
+                                                                                <div className="reply-preview-content">
+                                                                                    <span className="reply-preview-name">
+                                                                                        {(() => {
+                                                                                            const replySender = msg.replyTo.senderId
+                                                                                            if (typeof replySender === 'object' && replySender?.name) {
+                                                                                                return replySender.name
+                                                                                            }
+                                                                                            if (typeof replySender === 'object' && replySender?._id) {
+                                                                                                const senderId = String(replySender._id)
+                                                                                                const foundParticipant = selectedContact?.participants?.find(p => {
+                                                                                                    const pId = p._id || p.userId?._id
+                                                                                                    return String(pId) === senderId
+                                                                                                })
+                                                                                                if (foundParticipant) {
+                                                                                                    return foundParticipant.name || foundParticipant.userId?.name || 'Người dùng'
+                                                                                                }
+                                                                                            }
+                                                                                            if (typeof replySender === 'string') {
+                                                                                                const foundParticipant = selectedContact?.participants?.find(p => {
+                                                                                                    const pId = p._id || p.userId?._id
+                                                                                                    return String(pId) === replySender
+                                                                                                })
+                                                                                                if (foundParticipant) {
+                                                                                                    return foundParticipant.name || foundParticipant.userId?.name || 'Người dùng'
+                                                                                                }
+                                                                                            }
+                                                                                            return 'Người dùng'
+                                                                                        })()}
+                                                                                    </span>
+                                                                                    <span className="reply-preview-text">
+                                                                                        {msg.replyTo.content?.length > 50 
+                                                                                            ? msg.replyTo.content.substring(0, 50) + '...' 
+                                                                                            : msg.replyTo.content || '[Tin nhắn đã bị xóa]'}
+                                                                                    </span>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                        {/* Forwarded indicator */}
+                                                                        {msg.isForwarded && (
+                                                                            <div className="message-forwarded-indicator">
+                                                                                <MdForward size={12} />
+                                                                                <span>Đã chuyển tiếp từ {msg.forwardedFrom?.originalSenderId?.name || 'tin nhắn khác'}</span>
+                                                                            </div>
+                                                                        )}
                                                                         {hasMessageAttachments(msg) ? renderMessageAttachments(msg) : null}
                                                                         {hasMessageAttachments(msg) && msg.content && !/^(\[(Ảnh|Video|File)\])/i.test(String(msg.content).trim()) ? (
                                                                             <div style={{ marginTop: hasMessageAttachments(msg) ? 6 : 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</div>
@@ -719,6 +777,29 @@ const ChatView = ({
                                                                                     ) : null}
                                                                                 </div>
                                                                             )}
+                                                                        </div>
+                                                                    )}
+
+                                                                    {/* Reply and Forward buttons */}
+                                                                    {!msg.isRecalled && (
+                                                                        <div className="message-action-buttons">
+                                                                            <button
+                                                                                className="message-action-btn"
+                                                                                title="Trả lời"
+                                                                                onClick={() => handleReplyMessage && handleReplyMessage(msg)}
+                                                                            >
+                                                                                <MdReply size={16} />
+                                                                            </button>
+                                                                            <button
+                                                                                className="message-action-btn"
+                                                                                title="Chuyển tiếp"
+                                                                                onClick={() => {
+                                                                                    if (setMessageToForward) setMessageToForward(msg)
+                                                                                    if (setShowForwardPopup) setShowForwardPopup(true)
+                                                                                }}
+                                                                            >
+                                                                                <MdForward size={16} />
+                                                                            </button>
                                                                         </div>
                                                                     )}
 
@@ -796,6 +877,54 @@ const ChatView = ({
                         )}
 
                         <div className="chat-input">
+                            {/* Reply preview */}
+                            {replyingTo && (
+                                <div className="chat-reply-preview">
+                                    <div className="reply-preview-left">
+                                        <MdReply size={18} color="#1d4ed8" />
+                                        <div className="reply-preview-info">
+                                            <span className="reply-preview-label">Đang trả lời <strong>{(() => {
+                                                const replySender = replyingTo.senderId
+                                                if (typeof replySender === 'object' && replySender?.name) {
+                                                    return replySender.name
+                                                }
+                                                if (typeof replySender === 'object' && replySender?._id) {
+                                                    const senderId = String(replySender._id)
+                                                    const foundParticipant = selectedContact?.participants?.find(p => {
+                                                        const pId = p._id || p.userId?._id
+                                                        return String(pId) === senderId
+                                                    })
+                                                    if (foundParticipant) {
+                                                        return foundParticipant.name || foundParticipant.userId?.name || 'tin nhắn'
+                                                    }
+                                                }
+                                                if (typeof replySender === 'string') {
+                                                    const foundParticipant = selectedContact?.participants?.find(p => {
+                                                        const pId = p._id || p.userId?._id
+                                                        return String(pId) === replySender
+                                                    })
+                                                    if (foundParticipant) {
+                                                        return foundParticipant.name || foundParticipant.userId?.name || 'tin nhắn'
+                                                    }
+                                                }
+                                                return 'tin nhắn'
+                                            })()}</strong></span>
+                                            <span className="reply-preview-text">
+                                                {replyingTo.content?.length > 60 
+                                                    ? replyingTo.content.substring(0, 60) + '...' 
+                                                    : replyingTo.content || '[Tin nhắn]'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <button 
+                                        className="reply-preview-cancel"
+                                        onClick={() => setReplyingTo && setReplyingTo(null)}
+                                        title="Hủy trả lời"
+                                    >
+                                        <MdClose size={18} />
+                                    </button>
+                                </div>
+                            )}
                             {selectedContact?.type === 'DIRECT' && isDirectChatBlocked ? (
                                 <div className="chat-input-blocked-notice">
                                     {directChatBlockedReason || 'Bạn không thể gửi tin nhắn trong cuộc trò chuyện này.'}
