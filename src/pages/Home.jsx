@@ -18,6 +18,7 @@ import UserInfoModal from '../components/home/UserInfoModal'
 import AddFriendModal from '../components/home/AddFriendModal'
 import SendRequestModal from '../components/home/SendRequestModal'
 import GroupModals from '../components/home/GroupModals'
+import ForwardPopup from '../components/home/ForwardPopup'
 import ChatView from '../components/home/views/ChatView'
 import FriendsView from '../components/home/views/FriendsView'
 import AIView from '../components/home/views/AIView'
@@ -58,6 +59,11 @@ const Home = () => {
   const [onlineStatus, setOnlineStatus] = useState({}) // { userId: { status: 'online'|'offline', lastSeen: timestamp } }
   const messagesEndRef = useRef(null)
   const messageInputRef = useRef(null)
+
+  // Reply and Forward states
+  const [replyingTo, setReplyingTo] = useState(null)
+  const [showForwardPopup, setShowForwardPopup] = useState(false)
+  const [messageToForward, setMessageToForward] = useState(null)
 
   const normalizeUserId = (value) => {
     if (!value) return ''
@@ -1664,6 +1670,7 @@ const Home = () => {
       }
     }).filter(Boolean)
     const temporaryMessageId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const replyToMessageId = replyingTo?._id || null
 
     // Render optimistic bubble immediately so text/emoji/media appear right away.
     const optimisticConversationId = activeConv?._id || `temp-conv-${Date.now()}`
@@ -1682,6 +1689,7 @@ const Home = () => {
       createdAt: new Date().toISOString(),
       isUploading: filesToSend.length > 0,
       uploadProgress: 0,
+      replyTo: replyingTo || null,
     }
 
     setMessages((prev) => [...prev, optimisticMessage])
@@ -1711,6 +1719,7 @@ const Home = () => {
     setNewMessage('')
     setPendingFiles([])
     setChatNotice('')
+    setReplyingTo(null)
     if (fileInputRef2.current) fileInputRef2.current.value = ''
     if (messageInputRef.current) {
       messageInputRef.current.style.height = 'auto'
@@ -1721,6 +1730,7 @@ const Home = () => {
       const form = new FormData()
       if (contentToSend) form.append('content', contentToSend)
       if (activeConv?._id) form.append('conversationId', activeConv._id)
+      if (replyToMessageId) form.append('replyToMessageId', replyToMessageId)
 
       // For direct messages, append recipientId
       if (activeConv?.type === 'DIRECT') {
@@ -1968,6 +1978,25 @@ const Home = () => {
       ))
     } catch (err) {
       setError(err.message || 'Không thể cập nhật ghim tin nhắn')
+    }
+  }
+
+  // Handle forward message
+  const handleForwardMessage = async ({ messageId, targetConversationIds, targetUserIds }) => {
+    try {
+      const result = await conversationService.forwardMessage({
+        messageId,
+        targetConversationIds,
+        targetUserIds
+      })
+      toast.success('Đã chuyển tiếp tin nhắn thành công', { id: 'forward-success' })
+      // Reload conversations to show the new forwarded messages
+      await loadConversations()
+      return result
+    } catch (err) {
+      const msg = err.message || 'Không thể chuyển tiếp tin nhắn'
+      toast.error(msg, { id: 'forward-error' })
+      throw err
     }
   }
 
@@ -2481,6 +2510,13 @@ const Home = () => {
             hasMyReaction={hasMyReaction}
             messageMenuOpen={messageMenuOpen}
             setMessageMenuOpen={setMessageMenuOpen}
+            handleReplyMessage={(msg) => setReplyingTo(msg)}
+            handleForwardMessage={handleForwardMessage}
+            replyingTo={replyingTo}
+            setReplyingTo={setReplyingTo}
+            showForwardPopup={showForwardPopup}
+            setShowForwardPopup={setShowForwardPopup}
+            setMessageToForward={setMessageToForward}
           />
         )
 
@@ -2610,6 +2646,18 @@ const Home = () => {
         {renderMainArea()}
 
         <ConfirmPopup popup={confirmPopup} onClose={closeConfirmPopup} />
+
+        <ForwardPopup
+          isOpen={showForwardPopup}
+          onClose={() => {
+            setShowForwardPopup(false)
+            setMessageToForward(null)
+          }}
+          conversations={conversations}
+          messageToForward={messageToForward}
+          onForward={handleForwardMessage}
+          user={user}
+        />
 
         <UserProfileModal
           open={showUserProfile}
