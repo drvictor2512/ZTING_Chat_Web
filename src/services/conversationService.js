@@ -157,47 +157,15 @@ const conversationService = {
 
   // Revoke deputy role
   revokeDeputyRole: async (conversationId, userId) => {
-    const base = {
-      conversationId,
-      memberId: userId,
-      userId
-    }
-
-    // Backend đang dùng assign-deputy cho cả cấp/thu hồi nhưng action có thể khác nhau.
-    const payloadCandidates = [
-      { ...base, action: 'revoke' },
-      { ...base, action: 'remove' },
-      { ...base, action: 'demote' },
-      { ...base, action: 'unassign' },
-      { ...base, deputyId: userId, action: 'revoke' },
-      { ...base, deputyId: userId, action: 'remove' }
-    ]
-
-    let lastError = null
-    for (const payload of payloadCandidates) {
-      try {
-        const res = await api.post('/conversations/group/assign-deputy', payload)
-        return res.data
-      } catch (error) {
-        lastError = error
-        const status = error?.response?.status
-        // Với endpoint sống nhưng validate/chuyển trạng thái khác nhau, tiếp tục thử biến thể kế tiếp.
-        if (status === 400 || status === 404 || status === 500) continue
-        throw error.response?.data || error.message
-      }
-    }
-
     try {
-      return await requestToFirstAvailableEndpoint(
-        [
-          { method: 'post', url: '/conversations/group/demote-member' },
-          { method: 'post', url: '/conversations/group/revoke-deputy' },
-          { method: 'post', url: '/conversations/group/demote' }
-        ],
-        { ...base, action: 'remove' }
-      )
-    } catch {
-      throw lastError?.response?.data || lastError?.message || 'Không thể thu hồi quyền phó nhóm'
+      const response = await api.post('/conversations/group/assign-deputy', {
+        conversationId,
+        memberId: userId,
+        action: 'remove'
+      })
+      return response.data
+    } catch (error) {
+      throw error.response?.data || error.message
     }
   },
 
