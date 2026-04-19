@@ -2918,6 +2918,18 @@
   background: #f3f4f6;
 }
 
+.message-react-emoji.message-react-remove {
+  color: #b91c1c;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+}
+
+.message-react-emoji.message-react-remove:hover {
+  background: #fee2e2;
+}
+
 .message-menu-container {
   position: relative;
   display: flex;

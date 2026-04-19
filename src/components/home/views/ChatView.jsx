@@ -8,7 +8,6 @@ import {
     MdEmojiEmotions,
     MdAttachFile,
     MdVideoLibrary,
-    MdCall,
     MdCallEnd,
     MdVideocam,
     MdVideocamOff,
@@ -16,7 +15,6 @@ import {
     MdMicOff,
     MdFullscreen,
     MdFullscreenExit,
-    MdPhoneInTalk,
     MdSend,
     MdMoreVert,
     MdReply,
@@ -111,9 +109,7 @@ const ChatView = ({
     localCallStream,
     remoteCallStreams,
     onStartDirectCall,
-    onStartDirectAudioCall,
     onStartGroupCall,
-    onStartGroupAudioCall,
     onAcceptIncomingCall,
     onRejectIncomingCall,
     onEndActiveCall,
@@ -276,8 +272,8 @@ const ChatView = ({
 
         const fileUrls = getMessageFileUrls(msg)
         if (!fileUrls.length) return 'Tin nhắn đính kèm'
-        if (fileUrls.every((url) => isImageUrl(url) || isGifUrl(url))) return '[Ảnh]'
-        if (fileUrls.every((url) => isVideoUrl(url))) return '[Video]'
+        if (fileUrls.every((url, index) => getAttachmentKind(msg, url, index) === 'image')) return '[Ảnh]'
+        if (fileUrls.every((url, index) => getAttachmentKind(msg, url, index) === 'video')) return '[Video]'
         return '[File]'
     }
 
@@ -302,6 +298,18 @@ const ChatView = ({
             .filter((url, index, arr) => arr.indexOf(url) === index)
     }
 
+    const getAttachmentKind = (msg, url, index) => {
+        const hintedKinds = Array.isArray(msg?.fileKinds) ? msg.fileKinds : []
+        const hinted = String(hintedKinds[index] || '').toLowerCase()
+
+        if (hinted === 'image' || hinted === 'video' || hinted === 'file') {
+            return hinted
+        }
+        if (isImageUrl(url) || isGifUrl(url)) return 'image'
+        if (isVideoUrl(url)) return 'video'
+        return 'file'
+    }
+
     const getMediaAndFiles = () => {
         const mediaList = []
         const fileList = []
@@ -313,21 +321,23 @@ const ChatView = ({
 
             // Check file urls first
             fileUrls.forEach((fileUrl, idx) => {
-                if (isImageUrl(fileUrl) || isGifUrl(fileUrl)) {
+                const attachmentKind = getAttachmentKind(msg, fileUrl, idx)
+
+                if (attachmentKind === 'image') {
                     mediaList.push({
                         id: `${msg._id}-${idx}`,
                         url: fileUrl,
                         type: 'image',
                         timestamp: msg.createdAt
                     })
-                } else if (isVideoUrl(fileUrl)) {
+                } else if (attachmentKind === 'video') {
                     mediaList.push({
                         id: `${msg._id}-${idx}`,
                         url: fileUrl,
                         type: 'video',
                         timestamp: msg.createdAt
                     })
-                } else if (isDocumentUrl(fileUrl)) {
+                } else {
                     fileList.push({
                         id: `${msg._id}-${idx}`,
                         url: fileUrl,
@@ -384,6 +394,30 @@ const ChatView = ({
     const callParticipantCount = 1 + (remoteCallStreams?.length || 0)
     const hasLocalVideoTrack = Boolean(localCallStream?.getVideoTracks?.()?.length)
 
+    const parseCallLog = (content) => {
+        const text = String(content || '').trim()
+        if (!text.startsWith('__CALL__:')) return null
+
+        try {
+            const payload = JSON.parse(text.slice('__CALL__:'.length))
+            const isAudio = String(payload?.callType || 'video') === 'audio'
+            const title = isAudio ? 'Cuộc gọi thoại' : 'Cuộc gọi video'
+            const type = String(payload?.type || '').toLowerCase()
+            const direction = String(payload?.direction || '').toLowerCase()
+            const duration = Number(payload?.duration || 0)
+
+            let subtitle = 'Cuộc gọi kết thúc'
+            if (type === 'rejected') subtitle = direction === 'outgoing' ? 'Bạn đã gọi nhưng bị từ chối' : 'Cuộc gọi bị từ chối'
+            else if (type === 'missed') subtitle = 'Cuộc gọi nhỡ'
+            else if (type === 'cancelled') subtitle = direction === 'outgoing' ? 'Bạn đã huỷ' : 'Người gọi đã huỷ'
+            else if (type === 'answered') subtitle = duration > 0 ? `Đã gọi ${duration} giây` : 'Cuộc gọi kết thúc'
+
+            return { title, subtitle }
+        } catch {
+            return { title: 'Cuộc gọi video', subtitle: 'Cuộc gọi kết thúc' }
+        }
+    }
+
     const renderMessageAttachments = (msg) => {
         if (msg?.isRecalled) return null
         const fileUrls = getMessageFileUrls(msg)
@@ -391,9 +425,22 @@ const ChatView = ({
         const uploadPercent = Number(msg?.uploadProgress || 0)
         const showUploadOverlay = Boolean(msg?.isUploading)
 
-        const imageUrls = fileUrls.filter(url => isImageUrl(url) || isGifUrl(url))
-        const videoUrls = fileUrls.filter(url => isVideoUrl(url))
-        const docUrls = fileUrls.filter(url => !isImageUrl(url) && !isGifUrl(url) && !isVideoUrl(url))
+        const imageUrls = []
+        const videoUrls = []
+        const docUrls = []
+
+        fileUrls.forEach((url, index) => {
+            const attachmentKind = getAttachmentKind(msg, url, index)
+            if (attachmentKind === 'image') {
+                imageUrls.push(url)
+                return
+            }
+            if (attachmentKind === 'video') {
+                videoUrls.push(url)
+                return
+            }
+            docUrls.push(url)
+        })
 
         return (
             <div className="message-attachments-wrap">
@@ -480,7 +527,7 @@ const ChatView = ({
                         </div>
                         <div className="call-zalo-actions">
                             <button type="button" className="call-zalo-btn accept" onClick={onAcceptIncomingCall}>
-                                <MdPhoneInTalk />
+                                <MdVideocam />
                                 Nhận
                             </button>
                             <button type="button" className="call-zalo-btn reject" onClick={onRejectIncomingCall}>
@@ -623,15 +670,6 @@ const ChatView = ({
                                     <>
                                         <button
                                             type="button"
-                                            className="chat-call-btn zalo-phone"
-                                            title="Gọi thoại"
-                                            onClick={onStartDirectAudioCall}
-                                            disabled={Boolean(activeCall)}
-                                        >
-                                            <MdCall />
-                                        </button>
-                                        <button
-                                            type="button"
                                             className="chat-call-btn zalo-video"
                                             title="Gọi video"
                                             onClick={onStartDirectCall}
@@ -643,15 +681,6 @@ const ChatView = ({
                                 ) : null}
                                 {selectedContact?.type === 'GROUP' ? (
                                     <>
-                                        <button
-                                            type="button"
-                                            className="chat-call-btn zalo-phone"
-                                            title="Gọi thoại nhóm"
-                                            onClick={onStartGroupAudioCall}
-                                            disabled={Boolean(activeCall)}
-                                        >
-                                            <MdCall />
-                                        </button>
                                         <button
                                             type="button"
                                             className="chat-call-btn zalo-video"
@@ -821,11 +850,13 @@ const ChatView = ({
                                                         <div className="group-sender-name">{group.senderName || 'User'}</div>
                                                     )}
                                                     {group.messages.map((msg, messageIdx) => {
+                                                        const myReactionEmoji = getMyReactionEmoji(msg)
                                                         const hasAttachmentStyle = hasMessageAttachments(msg) ||
                                                             isGifUrl(msg.content) ||
                                                             isImageUrl(msg.content) ||
                                                             isVideoUrl(msg.content) ||
                                                             isDocumentUrl(msg.content)
+                                                        const callLogData = parseCallLog(msg?.content)
 
                                                         return (
                                                             <div
@@ -915,6 +946,11 @@ const ChatView = ({
                                                                                 </div>
                                                                                 <button className="message-file-download" onClick={() => downloadFile(msg.content, basenameFromUrl(msg.content))} title="Tải về">⬇ Tải về</button>
                                                                             </div>
+                                                                        ) : !hasMessageAttachments(msg) && callLogData ? (
+                                                                            <div style={{ minWidth: 220 }}>
+                                                                                <div style={{ fontWeight: 700 }}>{callLogData.title}</div>
+                                                                                <div style={{ opacity: 0.85, marginTop: 2 }}>{callLogData.subtitle}</div>
+                                                                            </div>
                                                                         ) : (
                                                                             !hasMessageAttachments(msg) ? <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</span> : null
                                                                         )}
@@ -995,7 +1031,7 @@ const ChatView = ({
                                                                             <button
                                                                                 className={`message-react-icon ${hasMyReaction(msg) ? 'active' : ''}`}
                                                                                 title="Thả cảm xúc"
-                                                                                onClick={() => handleToggleMessageReaction(msg, '👍')}
+                                                                                onClick={() => setReactHoverMessageId((prev) => (prev === msg._id ? null : msg._id))}
                                                                             >
                                                                                 👍
                                                                             </button>
@@ -1009,15 +1045,27 @@ const ChatView = ({
                                                                                     {BASIC_REACTIONS.map((emoji) => (
                                                                                         <button
                                                                                             key={`${msg._id}-${emoji}`}
-                                                                                            className={`message-react-emoji ${getMyReactionEmoji(msg) === emoji ? 'active' : ''}`}
+                                                                                            className={`message-react-emoji ${myReactionEmoji === emoji ? 'active' : ''}`}
                                                                                             onClick={() => {
-                                                                                                handleToggleMessageReaction(msg, emoji)
+                                                                                                handleToggleMessageReaction(msg, emoji, { remove: false })
                                                                                                 setReactHoverMessageId(null)
                                                                                             }}
                                                                                         >
                                                                                             {emoji}
                                                                                         </button>
                                                                                     ))}
+                                                                                    {myReactionEmoji ? (
+                                                                                        <button
+                                                                                            className="message-react-emoji message-react-remove"
+                                                                                            title="Bỏ cảm xúc"
+                                                                                            onClick={() => {
+                                                                                                handleToggleMessageReaction(msg, '', { remove: true })
+                                                                                                setReactHoverMessageId(null)
+                                                                                            }}
+                                                                                        >
+                                                                                            ✕
+                                                                                        </button>
+                                                                                    ) : null}
                                                                                 </div>
                                                                             ) : null}
                                                                         </div>

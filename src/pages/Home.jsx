@@ -939,6 +939,39 @@ const Home = () => {
     toast.success(`Kết thúc cuộc gọi ${modeLabel}. Thời lượng: ${formatCallDuration(elapsedSeconds)}`)
   }
 
+  const sendCallLogMessage = async (callSnapshot, { type, duration = 0 } = {}) => {
+    if (!callSnapshot || !type) return
+
+    const payload = {
+      type,
+      direction: callSnapshot.direction || 'outgoing',
+      callType: callSnapshot.callMode === 'audio' ? 'audio' : 'video',
+      duration: Math.max(0, Math.floor(Number(duration) || 0)),
+      peerId: callSnapshot.peerUserId,
+      peerName: callSnapshot.peerName || ''
+    }
+
+    const content = `__CALL__:${JSON.stringify(payload)}`
+    const form = new FormData()
+    form.append('content', content)
+
+    try {
+      if (callSnapshot.type === 'GROUP') {
+        if (callSnapshot.conversationId) {
+          form.append('conversationId', String(callSnapshot.conversationId))
+          await conversationService.sendGroupMessage(form)
+        }
+        return
+      }
+
+      if (callSnapshot.conversationId) form.append('conversationId', String(callSnapshot.conversationId))
+      if (callSnapshot.peerUserId) form.append('recipientId', String(callSnapshot.peerUserId))
+      await conversationService.sendDirectMessage(form)
+    } catch (error) {
+      console.warn('send call log message failed', error)
+    }
+  }
+
   const handleStartDirectCall = async (callMode = 'video') => {
     if (!selectedContact || selectedContact.type !== 'DIRECT') return
     const targetUserId = getDirectParticipantId(selectedContact)
@@ -969,6 +1002,7 @@ const Home = () => {
         conversationId: selectedContact._id || null,
         peerUserId: targetUserId,
         peerName: selectedContact.participantName || selectedContact.name || 'Người dùng',
+        direction: 'outgoing',
         startedAt: Date.now()
       })
 
@@ -1003,6 +1037,7 @@ const Home = () => {
         conversationId: String(selectedContact._id),
         conversationName: selectedContact.name || 'Nhóm',
         peerUserIds: [],
+        direction: 'outgoing',
         startedAt: Date.now()
       })
     } catch (err) {
@@ -1036,6 +1071,7 @@ const Home = () => {
           conversationId: incomingCall.conversationId || null,
           peerUserId: incomingCall.fromUserId,
           peerName: getUserDisplayNameById(incomingCall.fromUserId),
+          direction: 'incoming',
           startedAt: Date.now()
         })
       } else if (incomingCall.type === 'GROUP') {
@@ -1055,6 +1091,7 @@ const Home = () => {
           conversationId: incomingCall.conversationId,
           conversationName: incomingCall.conversationName || selectedContact?.name || 'Nhóm',
           peerUserIds: [],
+          direction: 'incoming',
           startedAt: Date.now()
         })
       }
@@ -1108,6 +1145,21 @@ const Home = () => {
         conversationId: activeCall.conversationId,
         callId: activeCall.callId,
         reason
+      })
+    }
+
+    const elapsedSeconds = Math.max(
+      0,
+      Math.floor((Date.now() - Number(callSnapshot?.startedAt || Date.now())) / 1000)
+    )
+
+    if (callSnapshot.direction === 'outgoing') {
+      const logType = reason === 'no-answer'
+        ? 'cancelled'
+        : (callSnapshot.status === 'calling' ? 'cancelled' : 'answered')
+      void sendCallLogMessage(callSnapshot, {
+        type: logType,
+        duration: logType === 'answered' ? elapsedSeconds : 0
       })
     }
 
@@ -1221,6 +1273,9 @@ const Home = () => {
       if (!activeCall || activeCall.type !== 'DIRECT') return
       if (String(activeCall.callId) !== payloadCallId) return
       clearToneLoop('outgoing')
+      if (activeCall.direction === 'outgoing') {
+        void sendCallLogMessage(activeCall, { type: 'rejected', duration: 0 })
+      }
       toast('Cuộc gọi bị từ chối')
       cleanupCallUi()
     }
@@ -1244,6 +1299,17 @@ const Home = () => {
       if (String(activeCall.callId) !== payloadCallId) return
       clearToneLoop('outgoing')
       clearOutgoingCallTimeout()
+      if (activeCall.direction === 'outgoing') {
+        const duration = Math.max(
+          0,
+          Math.floor((Date.now() - Number(activeCall?.startedAt || Date.now())) / 1000)
+        )
+        const type = activeCall.status === 'calling' ? 'missed' : 'answered'
+        void sendCallLogMessage(activeCall, {
+          type,
+          duration: type === 'answered' ? duration : 0
+        })
+      }
       if (activeCall.status !== 'calling') {
         showCallDurationToast(activeCall)
       }
@@ -1366,6 +1432,17 @@ const Home = () => {
 
       if (!activeCall || activeCall.type !== 'GROUP') return
       if (String(activeCall.callId) !== payloadCallId) return
+      if (activeCall.direction === 'outgoing') {
+        const duration = Math.max(
+          0,
+          Math.floor((Date.now() - Number(activeCall?.startedAt || Date.now())) / 1000)
+        )
+        const type = activeCall.status === 'calling' ? 'missed' : 'answered'
+        void sendCallLogMessage(activeCall, {
+          type,
+          duration: type === 'answered' ? duration : 0
+        })
+      }
       showCallDurationToast(activeCall)
       toast('Cuộc gọi nhóm đã kết thúc')
       cleanupCallUi()
@@ -2435,6 +2512,12 @@ const Home = () => {
         avatarUrl: user?.avatarUrl,
       },
       content: contentToSend,
+      fileKinds: filesToSend.map((file) => {
+        const mimeType = String(file?.type || '').toLowerCase()
+        if (mimeType.startsWith('image/')) return 'image'
+        if (mimeType.startsWith('video/')) return 'video'
+        return 'file'
+      }),
       fileUrls: previewUrls,
       fileUrl: previewUrls[0] || null,
       createdAt: new Date().toISOString(),
@@ -2694,17 +2777,20 @@ const Home = () => {
     return myEmoji === emoji
   }
 
-  const handleToggleMessageReaction = async (msg, emoji = '👍') => {
+  const handleToggleMessageReaction = async (msg, emoji = '👍', options = {}) => {
     if (!msg?._id) return
     try {
       const myEmoji = getMyReactionEmoji(msg)
-      const normalizedEmoji = String(emoji || '').trim() || '👍'
+      const normalizedEmoji = String(emoji ?? '').trim()
+      const shouldRemove = options?.remove === true || normalizedEmoji.length === 0
 
-      const response = myEmoji
-        ? (myEmoji === normalizedEmoji
-          ? await conversationService.removeMessageReaction(msg._id)
-          : await conversationService.reactToMessage(msg._id, normalizedEmoji))
-        : await conversationService.reactToMessage(msg._id, normalizedEmoji)
+      if (shouldRemove && !myEmoji) {
+        return
+      }
+
+      const response = shouldRemove
+        ? await conversationService.removeMessageReaction(msg._id)
+        : await conversationService.reactToMessage(msg._id, normalizedEmoji || '👍')
 
       const updatedMessage = response?.message
       if (!updatedMessage?._id) return
@@ -3282,9 +3368,7 @@ const Home = () => {
             localCallStream={localCallStream}
             remoteCallStreams={remoteCallStreams}
             onStartDirectCall={() => handleStartDirectCall('video')}
-            onStartDirectAudioCall={() => handleStartDirectCall('audio')}
             onStartGroupCall={() => handleStartGroupCall('video')}
-            onStartGroupAudioCall={() => handleStartGroupCall('audio')}
             onAcceptIncomingCall={handleAcceptIncomingCall}
             onRejectIncomingCall={handleRejectIncomingCall}
             onEndActiveCall={handleEndActiveCall}

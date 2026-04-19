@@ -70,6 +70,27 @@ export function buildLastMessagePreview(lastMessage, { isPendingConversation = f
 
     const content = String(lastMessage?.content || '').trim()
     if (content) {
+        if (content.startsWith('__CALL__:')) {
+            try {
+                const raw = content.slice('__CALL__:'.length)
+                const callLog = JSON.parse(raw)
+                const callType = String(callLog?.callType || 'video') === 'audio' ? 'thoại' : 'video'
+                const type = String(callLog?.type || '').toLowerCase()
+                const duration = Number(callLog?.duration || 0)
+
+                if (type === 'rejected') return `Cuộc gọi ${callType} · Bị từ chối`
+                if (type === 'missed') return `Cuộc gọi ${callType} · Cuộc gọi nhỡ`
+                if (type === 'cancelled') return `Cuộc gọi ${callType} · Đã hủy`
+                if (type === 'answered') {
+                    if (duration > 0) return `Cuộc gọi ${callType} · Đã gọi ${duration} giây`
+                    return `Cuộc gọi ${callType} · Đã kết thúc`
+                }
+                return `Cuộc gọi ${callType}`
+            } catch {
+                return 'Cuộc gọi video'
+            }
+        }
+
         const matched = content.match(/^\[File\]\s*(.+)$/i)
         if (matched?.[1]) return `[File] ${matched[1].trim()}`
         if (/^\[Ảnh\]$/i.test(content)) return '[Ảnh]'
