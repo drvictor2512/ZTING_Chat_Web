@@ -363,6 +363,381 @@
   transform: none;
 }
 
+.chat-call-btn {
+  border: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  margin-right: 10px;
+  color: #22385a;
+  font-size: 23px;
+  line-height: 1;
+  transition: color 0.16s ease, transform 0.16s ease;
+}
+
+.chat-call-btn:hover {
+  color: #0f2747;
+  transform: translateY(-0.5px);
+}
+
+.chat-call-btn.zalo-phone {
+  background: transparent;
+}
+
+.chat-call-btn.zalo-video {
+  background: transparent;
+}
+
+.chat-call-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+}
+
+.call-zalo-overlay {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(0, 104, 255, 0.18) 0%, rgba(2, 6, 23, 0.72) 70%);
+  z-index: 4000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.call-zalo-incoming {
+  width: min(420px, 100%);
+  text-align: center;
+  border-radius: 26px;
+  background: linear-gradient(180deg, #1778ff 0%, #0058d6 100%);
+  box-shadow: 0 25px 50px rgba(2, 6, 23, 0.35);
+  color: #fff;
+  padding: 28px 20px 24px;
+}
+
+.call-zalo-avatar-ring {
+  width: 106px;
+  height: 106px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.16);
+  animation: zaloPulse 1.8s infinite;
+}
+
+.call-zalo-avatar-core {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 28px;
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.call-zalo-incoming h3 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.call-zalo-incoming p {
+  margin: 7px 0 0;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.call-zalo-ringing-text {
+  margin-top: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  opacity: 0.96;
+}
+
+.call-zalo-ringing-text .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  animation: zaloBlink 1s infinite;
+}
+
+.call-zalo-actions {
+  margin-top: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.call-zalo-btn {
+  border: none;
+  border-radius: 999px;
+  height: 42px;
+  min-width: 128px;
+  padding: 0 14px;
+  color: #fff;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  cursor: pointer;
+}
+
+.call-zalo-btn.accept {
+  background: #00a85f;
+}
+
+.call-zalo-btn.reject {
+  background: #ff4d4f;
+}
+
+.call-zalo-panel {
+  position: fixed;
+  left: 50%;
+  top: 53%;
+  transform: translate(-50%, -50%);
+  width: min(920px, calc(100vw - 70px));
+  max-height: 82vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #d8e6ff;
+  background: linear-gradient(180deg, #f5f9ff 0%, #ffffff 100%);
+  padding: 12px;
+  border-radius: 14px;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.26);
+  z-index: 3300;
+}
+
+.call-zalo-panel.maximized {
+  top: 50%;
+  width: min(1220px, calc(100vw - 16px));
+  max-height: calc(100vh - 24px);
+  height: calc(100vh - 24px);
+  padding: 14px;
+}
+
+.call-zalo-panel.fullscreen-mode {
+  top: 50%;
+  width: calc(100vw - 8px);
+  max-height: calc(100vh - 8px);
+  height: calc(100vh - 8px);
+  border-radius: 10px;
+}
+
+.call-zalo-panel:fullscreen {
+  position: fixed;
+  inset: 0;
+  left: 0;
+  top: 0;
+  transform: none;
+  width: 100vw;
+  max-width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  border-radius: 0;
+  border: none;
+  padding: 14px;
+  overflow: hidden;
+}
+
+.call-zalo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.call-zalo-title {
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.call-zalo-subtitle {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.call-zalo-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.call-zalo-control-btn {
+  border: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.call-zalo-control-btn.active {
+  background: #0068ff;
+  color: #fff;
+}
+
+.call-zalo-control-btn.muted {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.call-zalo-control-btn.end {
+  background: #ff4d4f;
+  color: #fff;
+}
+
+.call-zalo-control-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.call-zalo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.call-zalo-panel.maximized .call-zalo-grid {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  min-height: calc(100% - 56px);
+}
+
+.call-zalo-panel.fullscreen-mode .call-zalo-grid,
+.call-zalo-panel:fullscreen .call-zalo-grid {
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  min-height: calc(100% - 56px);
+}
+
+.call-zalo-grid.audio {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+.call-zalo-tile {
+  border-radius: 14px;
+  overflow: hidden;
+  background: #0f172a;
+  position: relative;
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.call-zalo-panel.maximized .call-zalo-tile {
+  min-height: 220px;
+}
+
+.call-zalo-panel.fullscreen-mode .call-zalo-tile,
+.call-zalo-panel:fullscreen .call-zalo-tile {
+  min-height: 280px;
+}
+
+.call-zalo-tile video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.call-zalo-avatar-only {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #0ea5e9;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 24px;
+}
+
+.call-zalo-tile span {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.72);
+  padding: 3px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+@keyframes zaloPulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.38);
+  }
+  70% {
+    transform: scale(1.02);
+    box-shadow: 0 0 0 20px rgba(255, 255, 255, 0);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+}
+
+@keyframes zaloBlink {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 768px) {
+  .call-zalo-panel {
+    width: calc(100vw - 18px);
+    max-height: 78vh;
+    top: 51%;
+    border-radius: 12px;
+  }
+
+  .call-zalo-panel.maximized {
+    width: calc(100vw - 8px);
+    height: calc(100vh - 8px);
+    max-height: calc(100vh - 8px);
+    border-radius: 10px;
+    padding: 10px;
+  }
+
+  .call-zalo-panel.maximized .call-zalo-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .call-zalo-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 .chat-input-blocked-notice {
   padding: 8px 12px;
   border-radius: 10px;
