@@ -9,6 +9,7 @@ import friendService from '../services/friendService'
 import userService from '../services/userService'
 import aiService from '../services/aiService'
 import socketService from '../services/socketService'
+import callService from '../services/callService'
 import { isImageUrl, isVideoUrl, isGifUrl, isDocumentUrl, basenameFromUrl, downloadFile } from '../utils/mediaHelpers'
 import AppSidebar from '../components/home/AppSidebar'
 import ConfirmPopup from '../components/home/ConfirmPopup'
@@ -60,11 +61,117 @@ const Home = () => {
   const [onlineStatus, setOnlineStatus] = useState({}) // { userId: { status: 'online'|'offline', lastSeen: timestamp } }
   const messagesEndRef = useRef(null)
   const messageInputRef = useRef(null)
+  const toneContextRef = useRef(null)
+  const incomingToneIntervalRef = useRef(null)
+  const outgoingToneIntervalRef = useRef(null)
+  const outgoingCallTimeoutRef = useRef(null)
 
   // Reply and Forward states
   const [replyingTo, setReplyingTo] = useState(null)
   const [showForwardPopup, setShowForwardPopup] = useState(false)
   const [messageToForward, setMessageToForward] = useState(null)
+
+  // Call states (WebRTC)
+  const [incomingCall, setIncomingCall] = useState(null)
+  const [activeCall, setActiveCall] = useState(null)
+  const [localCallStream, setLocalCallStream] = useState(null)
+  const [remoteCallStreams, setRemoteCallStreams] = useState([])
+  const [callAudioEnabled, setCallAudioEnabled] = useState(true)
+  const [callVideoEnabled, setCallVideoEnabled] = useState(true)
+
+  const createCallId = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID()
+    }
+    return `call-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  }
+
+  const clearToneLoop = (kind = 'incoming') => {
+    const ref = kind === 'incoming' ? incomingToneIntervalRef : outgoingToneIntervalRef
+    if (ref.current) {
+      window.clearInterval(ref.current)
+      ref.current = null
+    }
+  }
+
+  const stopAllCallTones = () => {
+    clearToneLoop('incoming')
+    clearToneLoop('outgoing')
+  }
+
+  const clearOutgoingCallTimeout = () => {
+    if (outgoingCallTimeoutRef.current) {
+      window.clearTimeout(outgoingCallTimeoutRef.current)
+      outgoingCallTimeoutRef.current = null
+    }
+  }
+
+  const ensureToneContext = async () => {
+    if (typeof window === 'undefined') return null
+    const AudioCtx = window.AudioContext || window.webkitAudioContext
+    if (!AudioCtx) return null
+
+    if (!toneContextRef.current) {
+      toneContextRef.current = new AudioCtx()
+    }
+
+    if (toneContextRef.current.state === 'suspended') {
+      await toneContextRef.current.resume()
+    }
+
+    return toneContextRef.current
+  }
+
+  const playToneBeep = (ctx, { frequency = 880, duration = 0.18, gainValue = 0.035, type = 'sine' } = {}) => {
+    if (!ctx) return
+
+    const oscillator = ctx.createOscillator()
+    const gain = ctx.createGain()
+    const now = ctx.currentTime
+
+    oscillator.type = type
+    oscillator.frequency.setValueAtTime(frequency, now)
+
+    gain.gain.setValueAtTime(0.0001, now)
+    gain.gain.exponentialRampToValueAtTime(gainValue, now + 0.02)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration)
+
+    oscillator.connect(gain)
+    gain.connect(ctx.destination)
+
+    oscillator.start(now)
+    oscillator.stop(now + duration + 0.02)
+  }
+
+  const startIncomingTone = async () => {
+    clearToneLoop('incoming')
+    const ctx = await ensureToneContext()
+    if (!ctx) return
+
+    // Nhịp chuông cuộc gọi đến: 2 tiếng ngắn lặp lại.
+    playToneBeep(ctx, { frequency: 880, duration: 0.16, gainValue: 0.04, type: 'triangle' })
+    window.setTimeout(() => playToneBeep(ctx, { frequency: 988, duration: 0.16, gainValue: 0.04, type: 'triangle' }), 220)
+
+    incomingToneIntervalRef.current = window.setInterval(() => {
+      playToneBeep(ctx, { frequency: 880, duration: 0.16, gainValue: 0.04, type: 'triangle' })
+      window.setTimeout(() => playToneBeep(ctx, { frequency: 988, duration: 0.16, gainValue: 0.04, type: 'triangle' }), 220)
+    }, 1800)
+  }
+
+  const startOutgoingTone = async () => {
+    clearToneLoop('outgoing')
+    const ctx = await ensureToneContext()
+    if (!ctx) return
+
+    // Nhịp chuông chờ khi mình đang gọi đi.
+    playToneBeep(ctx, { frequency: 520, duration: 0.18, gainValue: 0.032, type: 'sine' })
+    window.setTimeout(() => playToneBeep(ctx, { frequency: 620, duration: 0.18, gainValue: 0.032, type: 'sine' }), 300)
+
+    outgoingToneIntervalRef.current = window.setInterval(() => {
+      playToneBeep(ctx, { frequency: 520, duration: 0.18, gainValue: 0.032, type: 'sine' })
+      window.setTimeout(() => playToneBeep(ctx, { frequency: 620, duration: 0.18, gainValue: 0.032, type: 'sine' }), 300)
+    }, 2100)
+  }
 
   const normalizeUserId = (value) => {
     if (!value) return ''
@@ -167,6 +274,39 @@ const Home = () => {
     const targetId = normalizeUserId(userId)
     if (!targetId) return false
     return blockedUsers.some(id => normalizeUserId(id) === targetId)
+  }
+
+  const getUserDisplayNameById = (userId) => {
+    const normalizedTarget = normalizeUserId(userId)
+    if (!normalizedTarget) return 'Người dùng'
+
+    if (normalizeUserId(user?._id) === normalizedTarget) return 'Bạn'
+
+    const fromFriends = friends.find((friend) => normalizeUserId(friend?._id) === normalizedTarget)
+    if (fromFriends?.name) return fromFriends.name
+
+    const fromConversations = conversations.find((conv) => {
+      if (normalizeUserId(conv?.participantId) === normalizedTarget) return true
+      const participants = Array.isArray(conv?.participants) ? conv.participants : []
+      return participants.some((p) => {
+        const pId = normalizeUserId(p?.userId?._id || p?._id || p?.userId)
+        return pId === normalizedTarget
+      })
+    })
+
+    if (fromConversations?.participantName) return fromConversations.participantName
+
+    if (Array.isArray(fromConversations?.participants)) {
+      const targetParticipant = fromConversations.participants.find((p) => {
+        const pId = normalizeUserId(p?.userId?._id || p?._id || p?.userId)
+        return pId === normalizedTarget
+      })
+
+      if (targetParticipant?.userId?.name) return targetParticipant.userId.name
+      if (targetParticipant?.name) return targetParticipant.name
+    }
+
+    return 'Người dùng'
   }
 
   const loadDirectBlockStatus = async (contact = selectedContact) => {
@@ -331,9 +471,11 @@ const Home = () => {
     const userId = user?._id
     if (userId) {
       socketService.connect(userId)
+      callService.setSocket(socketService.getSocket())
     }
 
     return () => {
+      callService.resetMedia()
       socketService.disconnect()
     }
   }, [navigate, user])
@@ -736,6 +878,564 @@ const Home = () => {
       socket.off('ai_error', handleAIError)
     }
   }, [aiConversation])
+
+  // Sync call media state from callService to UI
+  useEffect(() => {
+    callService.setCallbacks({
+      onLocalStreamChanged: (stream) => setLocalCallStream(stream || null),
+      onRemoteStreamsChanged: (streams) => setRemoteCallStreams(Array.isArray(streams) ? streams : []),
+      onError: (message) => {
+        if (message) toast.error(message, { id: 'call-media-error' })
+      },
+      onWarning: (message) => {
+        if (message) toast(message, { id: 'call-media-warning' })
+      },
+      onPeerDisconnected: (peerId) => {
+        setActiveCall((prev) => {
+          if (!prev) return prev
+          if (prev.type !== 'GROUP') return prev
+          const nextPeers = (prev.peerUserIds || []).filter((id) => String(id) !== String(peerId))
+          return { ...prev, peerUserIds: nextPeers }
+        })
+      }
+    })
+  }, [])
+
+  const cleanupCallUi = () => {
+    stopAllCallTones()
+    clearOutgoingCallTimeout()
+    callService.resetMedia()
+    setIncomingCall(null)
+    setActiveCall(null)
+    setCallAudioEnabled(true)
+    setCallVideoEnabled(true)
+    setLocalCallStream(null)
+    setRemoteCallStreams([])
+  }
+
+  const formatCallDuration = (totalSeconds = 0) => {
+    const safe = Math.max(0, Number(totalSeconds) || 0)
+    const hh = Math.floor(safe / 3600)
+    const mm = Math.floor((safe % 3600) / 60)
+    const ss = safe % 60
+
+    if (hh > 0) {
+      return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
+    }
+
+    return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
+  }
+
+  const showCallDurationToast = (callSnapshot) => {
+    if (!callSnapshot) return
+
+    const startedAt = Number(callSnapshot?.startedAt || 0)
+    if (!startedAt) return
+
+    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
+    if (elapsedSeconds <= 0) return
+
+    const modeLabel = callSnapshot?.callMode === 'audio' ? 'thoại' : 'video'
+    toast.success(`Kết thúc cuộc gọi ${modeLabel}. Thời lượng: ${formatCallDuration(elapsedSeconds)}`)
+  }
+
+  const handleStartDirectCall = async (callMode = 'video') => {
+    if (!selectedContact || selectedContact.type !== 'DIRECT') return
+    const targetUserId = getDirectParticipantId(selectedContact)
+    if (!targetUserId) {
+      toast.error('Không xác định được người nhận cuộc gọi')
+      return
+    }
+
+    const callId = createCallId()
+
+    try {
+      await callService.startDirectCall({
+        targetUserId,
+        callId,
+        conversationId: selectedContact._id || null,
+        metadata: { type: callMode },
+        callMode
+      })
+
+      setCallAudioEnabled(true)
+      setCallVideoEnabled(true)
+      setIncomingCall(null)
+      setActiveCall({
+        type: 'DIRECT',
+        status: 'calling',
+        callMode,
+        callId,
+        conversationId: selectedContact._id || null,
+        peerUserId: targetUserId,
+        peerName: selectedContact.participantName || selectedContact.name || 'Người dùng',
+        startedAt: Date.now()
+      })
+
+      startOutgoingTone()
+    } catch (err) {
+      console.error('start direct call error', err)
+      toast.error('Không thể bắt đầu cuộc gọi video')
+      cleanupCallUi()
+    }
+  }
+
+  const handleStartGroupCall = async (callMode = 'video') => {
+    if (!selectedContact || selectedContact.type !== 'GROUP' || !selectedContact._id) return
+    const callId = createCallId()
+
+    try {
+      await callService.startGroupCall({
+        conversationId: String(selectedContact._id),
+        callId,
+        metadata: { type: callMode },
+        callMode
+      })
+
+      setCallAudioEnabled(true)
+      setCallVideoEnabled(true)
+      setIncomingCall(null)
+      setActiveCall({
+        type: 'GROUP',
+        status: 'in-call',
+        callMode,
+        callId,
+        conversationId: String(selectedContact._id),
+        conversationName: selectedContact.name || 'Nhóm',
+        peerUserIds: [],
+        startedAt: Date.now()
+      })
+    } catch (err) {
+      console.error('start group call error', err)
+      toast.error('Không thể bắt đầu cuộc gọi nhóm')
+      cleanupCallUi()
+    }
+  }
+
+  const handleAcceptIncomingCall = async () => {
+    if (!incomingCall) return
+
+    try {
+      clearToneLoop('incoming')
+
+      if (incomingCall.type === 'DIRECT') {
+        await callService.acceptDirectCall({
+          fromUserId: incomingCall.fromUserId,
+          callId: incomingCall.callId,
+          offer: incomingCall.offer,
+          callMode: incomingCall.callMode || 'video'
+        })
+
+        setCallAudioEnabled(true)
+        setCallVideoEnabled(true)
+        setActiveCall({
+          type: 'DIRECT',
+          status: 'in-call',
+          callMode: incomingCall.callMode || 'video',
+          callId: incomingCall.callId,
+          conversationId: incomingCall.conversationId || null,
+          peerUserId: incomingCall.fromUserId,
+          peerName: getUserDisplayNameById(incomingCall.fromUserId),
+          startedAt: Date.now()
+        })
+      } else if (incomingCall.type === 'GROUP') {
+        await callService.joinGroupCall({
+          conversationId: incomingCall.conversationId,
+          callId: incomingCall.callId,
+          callMode: incomingCall.callMode || 'video'
+        })
+
+        setCallAudioEnabled(true)
+        setCallVideoEnabled(true)
+        setActiveCall({
+          type: 'GROUP',
+          status: 'in-call',
+          callMode: incomingCall.callMode || 'video',
+          callId: incomingCall.callId,
+          conversationId: incomingCall.conversationId,
+          conversationName: incomingCall.conversationName || selectedContact?.name || 'Nhóm',
+          peerUserIds: [],
+          startedAt: Date.now()
+        })
+      }
+
+      setIncomingCall(null)
+    } catch (err) {
+      console.error('accept incoming call error', err)
+      toast.error('Không thể tham gia cuộc gọi')
+      cleanupCallUi()
+    }
+  }
+
+  const handleRejectIncomingCall = () => {
+    if (!incomingCall) return
+
+    clearToneLoop('incoming')
+
+    if (incomingCall.type === 'DIRECT') {
+      callService.rejectDirectCall({
+        targetUserId: incomingCall.fromUserId,
+        callId: incomingCall.callId,
+        reason: 'rejected'
+      })
+    } else if (incomingCall.type === 'GROUP') {
+      callService.leaveGroupCall({
+        conversationId: incomingCall.conversationId,
+        callId: incomingCall.callId,
+        reason: 'rejected'
+      })
+    }
+
+    setIncomingCall(null)
+  }
+
+  const handleEndActiveCall = (reason = 'ended') => {
+    if (!activeCall) {
+      cleanupCallUi()
+      return
+    }
+
+    const callSnapshot = { ...activeCall }
+
+    if (activeCall.type === 'DIRECT') {
+      callService.endDirectCall({
+        targetUserId: activeCall.peerUserId,
+        callId: activeCall.callId,
+        reason
+      })
+    } else {
+      callService.leaveGroupCall({
+        conversationId: activeCall.conversationId,
+        callId: activeCall.callId,
+        reason
+      })
+    }
+
+    if (reason === 'no-answer') {
+      toast('Không có phản hồi sau 30 giây. Đã tự động hủy cuộc gọi.')
+    } else if (callSnapshot.status !== 'calling') {
+      showCallDurationToast(callSnapshot)
+    }
+
+    cleanupCallUi()
+  }
+
+  useEffect(() => {
+    clearOutgoingCallTimeout()
+
+    if (!activeCall || activeCall.type !== 'DIRECT' || activeCall.status !== 'calling') {
+      return
+    }
+
+    outgoingCallTimeoutRef.current = window.setTimeout(() => {
+      handleEndActiveCall('no-answer')
+    }, 30000)
+
+    return () => {
+      clearOutgoingCallTimeout()
+    }
+  }, [activeCall])
+
+  const handleToggleCallAudio = () => {
+    const nextEnabled = !callAudioEnabled
+    callService.toggleAudio(nextEnabled)
+    setCallAudioEnabled(nextEnabled)
+  }
+
+  const handleToggleCallVideo = () => {
+    const nextEnabled = !callVideoEnabled
+    callService.toggleVideo(nextEnabled)
+    setCallVideoEnabled(nextEnabled)
+  }
+
+  // Listen for signaling events from backend
+  useEffect(() => {
+    const socket = socketService.getSocket()
+    if (!socket) return
+
+    callService.setSocket(socket)
+
+    const handleCallIncoming = (payload = {}) => {
+      const fromUserId = normalizeUserId(payload.fromUserId)
+      if (!fromUserId || !payload.callId) return
+
+      if (activeCall) {
+        callService.rejectDirectCall({
+          targetUserId: fromUserId,
+          callId: payload.callId,
+          reason: 'busy'
+        })
+        return
+      }
+
+      setIncomingCall({
+        type: 'DIRECT',
+        callMode: payload?.metadata?.type === 'audio' ? 'audio' : 'video',
+        callId: payload.callId,
+        conversationId: payload.conversationId || null,
+        fromUserId,
+        fromUserName: getUserDisplayNameById(fromUserId),
+        offer: payload.offer || null
+      })
+
+      startIncomingTone()
+    }
+
+    const handleCallAnswered = async (payload = {}) => {
+      if (!payload.callId || !payload.answer || !payload.fromUserId) return
+      try {
+        await callService.applyDirectAnswer({
+          fromUserId: payload.fromUserId,
+          answer: payload.answer
+        })
+        clearToneLoop('outgoing')
+        clearOutgoingCallTimeout()
+        setActiveCall((prev) => {
+          if (!prev || prev.type !== 'DIRECT' || String(prev.callId) !== String(payload.callId)) return prev
+          return { ...prev, status: 'in-call' }
+        })
+      } catch (err) {
+        console.error('apply direct answer error', err)
+      }
+    }
+
+    const handleCallIceCandidate = async (payload = {}) => {
+      if (!payload.fromUserId || !payload.candidate) return
+      await callService.addIceCandidate(payload.fromUserId, payload.candidate)
+    }
+
+    const handleCallRejected = (payload = {}) => {
+      const payloadCallId = String(payload?.callId || '')
+      if (!payloadCallId) return
+
+      const isMatchingIncoming =
+        incomingCall?.type === 'DIRECT' && String(incomingCall.callId) === payloadCallId
+
+      if (isMatchingIncoming) {
+        clearToneLoop('incoming')
+        setIncomingCall(null)
+        toast('Cuộc gọi đã bị từ chối')
+        return
+      }
+
+      if (!activeCall || activeCall.type !== 'DIRECT') return
+      if (String(activeCall.callId) !== payloadCallId) return
+      clearToneLoop('outgoing')
+      toast('Cuộc gọi bị từ chối')
+      cleanupCallUi()
+    }
+
+    const handleCallEnded = (payload = {}) => {
+      const payloadCallId = String(payload?.callId || '')
+      if (!payloadCallId) return
+      const endReason = String(payload?.reason || '')
+
+      const isMatchingIncoming =
+        incomingCall?.type === 'DIRECT' && String(incomingCall.callId) === payloadCallId
+
+      if (isMatchingIncoming) {
+        clearToneLoop('incoming')
+        setIncomingCall(null)
+        toast(endReason === 'no-answer' ? 'Cuộc gọi nhỡ' : 'Người gọi đã hủy cuộc gọi')
+        return
+      }
+
+      if (!activeCall || activeCall.type !== 'DIRECT') return
+      if (String(activeCall.callId) !== payloadCallId) return
+      clearToneLoop('outgoing')
+      clearOutgoingCallTimeout()
+      if (activeCall.status !== 'calling') {
+        showCallDurationToast(activeCall)
+      }
+      toast(endReason === 'no-answer' ? 'Cuộc gọi không được trả lời' : 'Cuộc gọi đã kết thúc')
+      cleanupCallUi()
+    }
+
+    const handleGroupIncoming = (payload = {}) => {
+      if (!payload.callId || !payload.conversationId || !payload.fromUserId) return
+      if (activeCall) return
+
+      const fromUserId = normalizeUserId(payload.fromUserId)
+      setIncomingCall({
+        type: 'GROUP',
+        callMode: payload?.metadata?.type === 'audio' ? 'audio' : 'video',
+        callId: String(payload.callId),
+        conversationId: String(payload.conversationId),
+        fromUserId,
+        fromUserName: getUserDisplayNameById(fromUserId),
+        conversationName: selectedContact?.name || 'Nhóm'
+      })
+
+      startIncomingTone()
+    }
+
+    const handleGroupUserJoined = async (payload = {}) => {
+      if (!payload.callId || !payload.conversationId || !payload.userId) return
+      if (!activeCall || activeCall.type !== 'GROUP') return
+      if (String(activeCall.callId) !== String(payload.callId)) return
+      if (String(activeCall.conversationId) !== String(payload.conversationId)) return
+
+      const joinedUserId = normalizeUserId(payload.userId)
+      if (!joinedUserId || joinedUserId === normalizeUserId(user?._id)) return
+
+      try {
+        await callService.createGroupOfferToUser({
+          conversationId: activeCall.conversationId,
+          callId: activeCall.callId,
+          targetUserId: joinedUserId
+        })
+
+        setActiveCall((prev) => {
+          if (!prev || prev.type !== 'GROUP') return prev
+          const exists = (prev.peerUserIds || []).some((id) => String(id) === String(joinedUserId))
+          if (exists) return prev
+          return { ...prev, peerUserIds: [...(prev.peerUserIds || []), joinedUserId] }
+        })
+      } catch (err) {
+        console.error('create group offer error', err)
+      }
+    }
+
+    const handleGroupOffer = async (payload = {}) => {
+      if (!payload.callId || !payload.conversationId || !payload.fromUserId || !payload.offer) return
+
+      try {
+        await callService.handleGroupOffer({
+          conversationId: String(payload.conversationId),
+          callId: String(payload.callId),
+          fromUserId: payload.fromUserId,
+          offer: payload.offer
+        })
+
+        const fromId = normalizeUserId(payload.fromUserId)
+        setActiveCall((prev) => {
+          if (!prev || prev.type !== 'GROUP') return prev
+          const exists = (prev.peerUserIds || []).some((id) => String(id) === String(fromId))
+          if (exists) return prev
+          return { ...prev, peerUserIds: [...(prev.peerUserIds || []), fromId] }
+        })
+      } catch (err) {
+        console.error('handle group offer error', err)
+      }
+    }
+
+    const handleGroupAnswer = async (payload = {}) => {
+      if (!payload.fromUserId || !payload.answer) return
+      try {
+        await callService.handleGroupAnswer({
+          fromUserId: payload.fromUserId,
+          answer: payload.answer
+        })
+      } catch (err) {
+        console.error('handle group answer error', err)
+      }
+    }
+
+    const handleGroupIce = async (payload = {}) => {
+      if (!payload.fromUserId || !payload.candidate) return
+      await callService.addIceCandidate(payload.fromUserId, payload.candidate)
+    }
+
+    const handleGroupUserLeft = (payload = {}) => {
+      if (!payload.userId) return
+      const leftUserId = normalizeUserId(payload.userId)
+      callService.closePeer(leftUserId)
+
+      setActiveCall((prev) => {
+        if (!prev || prev.type !== 'GROUP') return prev
+        return {
+          ...prev,
+          peerUserIds: (prev.peerUserIds || []).filter((id) => String(id) !== String(leftUserId))
+        }
+      })
+    }
+
+    const handleGroupEnded = (payload = {}) => {
+      const payloadCallId = String(payload?.callId || '')
+      if (!payloadCallId) return
+
+      const isMatchingIncoming =
+        incomingCall?.type === 'GROUP' && String(incomingCall.callId) === payloadCallId
+
+      if (isMatchingIncoming) {
+        clearToneLoop('incoming')
+        setIncomingCall(null)
+        toast('Cuộc gọi nhóm đã kết thúc')
+        return
+      }
+
+      if (!activeCall || activeCall.type !== 'GROUP') return
+      if (String(activeCall.callId) !== payloadCallId) return
+      showCallDurationToast(activeCall)
+      toast('Cuộc gọi nhóm đã kết thúc')
+      cleanupCallUi()
+    }
+
+    const handleCallError = (payload = {}) => {
+      const message = payload?.message || 'Lỗi cuộc gọi'
+      toast.error(message, { id: 'call-signal-error' })
+    }
+
+    socket.on('call:incoming', handleCallIncoming)
+    socket.on('call:answered', handleCallAnswered)
+    socket.on('call:ice-candidate', handleCallIceCandidate)
+    socket.on('call:rejected', handleCallRejected)
+    socket.on('call:ended', handleCallEnded)
+
+    socket.on('group-call:incoming', handleGroupIncoming)
+    socket.on('group-call:user-joined', handleGroupUserJoined)
+    socket.on('group-call:offer', handleGroupOffer)
+    socket.on('group-call:answer', handleGroupAnswer)
+    socket.on('group-call:ice-candidate', handleGroupIce)
+    socket.on('group-call:user-left', handleGroupUserLeft)
+    socket.on('group-call:ended', handleGroupEnded)
+
+    socket.on('call:error', handleCallError)
+
+    return () => {
+      socket.off('call:incoming', handleCallIncoming)
+      socket.off('call:answered', handleCallAnswered)
+      socket.off('call:ice-candidate', handleCallIceCandidate)
+      socket.off('call:rejected', handleCallRejected)
+      socket.off('call:ended', handleCallEnded)
+
+      socket.off('group-call:incoming', handleGroupIncoming)
+      socket.off('group-call:user-joined', handleGroupUserJoined)
+      socket.off('group-call:offer', handleGroupOffer)
+      socket.off('group-call:answer', handleGroupAnswer)
+      socket.off('group-call:ice-candidate', handleGroupIce)
+      socket.off('group-call:user-left', handleGroupUserLeft)
+      socket.off('group-call:ended', handleGroupEnded)
+
+      socket.off('call:error', handleCallError)
+    }
+  }, [activeCall, incomingCall, selectedContact, conversations, friends, user])
+
+  useEffect(() => {
+    return () => {
+      cleanupCallUi()
+    }
+  }, [])
+
+  useEffect(() => {
+    const unlockAudio = () => {
+      ensureToneContext().catch(() => { })
+    }
+
+    window.addEventListener('pointerdown', unlockAudio, { once: true })
+    window.addEventListener('keydown', unlockAudio, { once: true })
+
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudio)
+      window.removeEventListener('keydown', unlockAudio)
+      stopAllCallTones()
+
+      if (toneContextRef.current) {
+        toneContextRef.current.close().catch(() => { })
+        toneContextRef.current = null
+      }
+    }
+  }, [])
 
   // Update filtered contacts based on search term and current view
   useEffect(() => {
@@ -2577,6 +3277,22 @@ const Home = () => {
             directChatBlockedReason={directChatBlockedReason}
             isDirectBlockedByMe={directBlockedByMe}
             isDirectBlockedByPeer={directBlockedByPeer}
+            incomingCall={incomingCall}
+            activeCall={activeCall}
+            localCallStream={localCallStream}
+            remoteCallStreams={remoteCallStreams}
+            onStartDirectCall={() => handleStartDirectCall('video')}
+            onStartDirectAudioCall={() => handleStartDirectCall('audio')}
+            onStartGroupCall={() => handleStartGroupCall('video')}
+            onStartGroupAudioCall={() => handleStartGroupCall('audio')}
+            onAcceptIncomingCall={handleAcceptIncomingCall}
+            onRejectIncomingCall={handleRejectIncomingCall}
+            onEndActiveCall={handleEndActiveCall}
+            onToggleCallAudio={handleToggleCallAudio}
+            onToggleCallVideo={handleToggleCallVideo}
+            callAudioEnabled={callAudioEnabled}
+            callVideoEnabled={callVideoEnabled}
+            getUserDisplayNameById={getUserDisplayNameById}
           />
         )
 

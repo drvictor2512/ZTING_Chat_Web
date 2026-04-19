@@ -8,6 +8,15 @@ import {
     MdEmojiEmotions,
     MdAttachFile,
     MdVideoLibrary,
+    MdCall,
+    MdCallEnd,
+    MdVideocam,
+    MdVideocamOff,
+    MdMic,
+    MdMicOff,
+    MdFullscreen,
+    MdFullscreenExit,
+    MdPhoneInTalk,
     MdSend,
     MdMoreVert,
     MdReply,
@@ -96,14 +105,34 @@ const ChatView = ({
     isDirectChatBlocked,
     directChatBlockedReason,
     isDirectBlockedByMe,
-    isDirectBlockedByPeer
+    isDirectBlockedByPeer,
+    incomingCall,
+    activeCall,
+    localCallStream,
+    remoteCallStreams,
+    onStartDirectCall,
+    onStartDirectAudioCall,
+    onStartGroupCall,
+    onStartGroupAudioCall,
+    onAcceptIncomingCall,
+    onRejectIncomingCall,
+    onEndActiveCall,
+    onToggleCallAudio,
+    onToggleCallVideo,
+    callAudioEnabled,
+    callVideoEnabled,
+    getUserDisplayNameById
 }) => {
     const BASIC_REACTIONS = ['👍', '❤️', '😂', '😮', '😢']
     const [pinMenuOpen, setPinMenuOpen] = useState(false)
     const [pinListOpen, setPinListOpen] = useState(false)
+    const [isCallMaximized, setIsCallMaximized] = useState(false)
+    const [isCallFullscreen, setIsCallFullscreen] = useState(false)
+    const [callDurationSeconds, setCallDurationSeconds] = useState(0)
     const [reactHoverMessageId, setReactHoverMessageId] = useState(null)
     const reactionHideTimerRef = useRef(null)
     const messageRefs = useRef(new Map())
+    const callPanelRef = useRef(null)
 
     const handleReactionHoverEnter = (messageId) => {
         if (reactionHideTimerRef.current) {
@@ -162,6 +191,83 @@ const ChatView = ({
         setPinMenuOpen(false)
         setPinListOpen(false)
     }, [selectedContact?._id])
+
+    useEffect(() => {
+        if (!activeCall) {
+            setIsCallMaximized(false)
+            setIsCallFullscreen(false)
+            setCallDurationSeconds(0)
+        }
+    }, [activeCall])
+
+    useEffect(() => {
+        const updateFullscreenState = () => {
+            const isFullscreen = document.fullscreenElement === callPanelRef.current
+            setIsCallFullscreen(isFullscreen)
+        }
+
+        document.addEventListener('fullscreenchange', updateFullscreenState)
+        return () => {
+            document.removeEventListener('fullscreenchange', updateFullscreenState)
+        }
+    }, [])
+
+    useEffect(() => {
+        if (!activeCall || activeCall.status === 'calling') {
+            setCallDurationSeconds(0)
+            return
+        }
+
+        const startedAt = Number(activeCall?.startedAt || Date.now())
+        const tick = () => {
+            const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
+            setCallDurationSeconds(elapsed)
+        }
+
+        tick()
+        const timerId = window.setInterval(tick, 1000)
+
+        return () => {
+            window.clearInterval(timerId)
+        }
+    }, [activeCall])
+
+    useEffect(() => {
+        if (activeCall) return
+        if (document.fullscreenElement === callPanelRef.current) {
+            document.exitFullscreen().catch(() => { })
+        }
+    }, [activeCall])
+
+    const formatCallDuration = (seconds = 0) => {
+        const total = Math.max(0, Number(seconds) || 0)
+        const hh = Math.floor(total / 3600)
+        const mm = Math.floor((total % 3600) / 60)
+        const ss = total % 60
+        if (hh > 0) {
+            return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
+        }
+        return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
+    }
+
+    const handleToggleCallFullscreen = async () => {
+        const panelNode = callPanelRef.current
+        if (!panelNode) return
+
+        try {
+            if (document.fullscreenElement === panelNode) {
+                await document.exitFullscreen()
+                setIsCallFullscreen(false)
+                return
+            }
+
+            await panelNode.requestFullscreen()
+            setIsCallFullscreen(true)
+        } catch {
+            // Fallback về layout maximize nếu browser từ chối fullscreen API.
+            setIsCallMaximized((prev) => !prev)
+        }
+    }
 
     const getPinnedPreview = (msg) => {
         if (!msg) return ''
@@ -273,6 +379,11 @@ const ChatView = ({
 
     const hasMessageAttachments = (msg) => getMessageFileUrls(msg).length > 0
 
+    const activeCallModeLabel = activeCall?.callMode === 'audio' ? 'Cuộc gọi thoại' : 'Cuộc gọi video'
+    const incomingCallModeLabel = incomingCall?.callMode === 'audio' ? 'Cuộc gọi thoại đến' : 'Cuộc gọi video đến'
+    const callParticipantCount = 1 + (remoteCallStreams?.length || 0)
+    const hasLocalVideoTrack = Boolean(localCallStream?.getVideoTracks?.()?.length)
+
     const renderMessageAttachments = (msg) => {
         if (msg?.isRecalled) return null
         const fileUrls = getMessageFileUrls(msg)
@@ -353,6 +464,34 @@ const ChatView = ({
 
     return (
         <div className="main-area chat-view">
+            {incomingCall ? (
+                <div className="call-zalo-overlay">
+                    <div className="call-zalo-incoming">
+                        <div className="call-zalo-avatar-ring">
+                            <div className="call-zalo-avatar-core">
+                                {(incomingCall?.fromUserName || 'U').charAt(0).toUpperCase()}
+                            </div>
+                        </div>
+                        <h3>{incomingCall.fromUserName || 'Người dùng'}</h3>
+                        <p>{incomingCallModeLabel}</p>
+                        <div className="call-zalo-ringing-text">
+                            <span className="dot" />
+                            Đang đổ chuông
+                        </div>
+                        <div className="call-zalo-actions">
+                            <button type="button" className="call-zalo-btn accept" onClick={onAcceptIncomingCall}>
+                                <MdPhoneInTalk />
+                                Nhận
+                            </button>
+                            <button type="button" className="call-zalo-btn reject" onClick={onRejectIncomingCall}>
+                                <MdCallEnd />
+                                Từ chối
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
+
             {conversations.length === 0 ? (
                 <div className="welcome">
                     <h1>CHÀO MỪNG ĐẾN VỚI ZTING</h1>
@@ -480,6 +619,50 @@ const ChatView = ({
                                 </div>
                             </div>
                             <div className="chat-header-actions">
+                                {selectedContact?.type === 'DIRECT' ? (
+                                    <>
+                                        <button
+                                            type="button"
+                                            className="chat-call-btn zalo-phone"
+                                            title="Gọi thoại"
+                                            onClick={onStartDirectAudioCall}
+                                            disabled={Boolean(activeCall)}
+                                        >
+                                            <MdCall />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="chat-call-btn zalo-video"
+                                            title="Gọi video"
+                                            onClick={onStartDirectCall}
+                                            disabled={Boolean(activeCall)}
+                                        >
+                                            <MdVideocam />
+                                        </button>
+                                    </>
+                                ) : null}
+                                {selectedContact?.type === 'GROUP' ? (
+                                    <>
+                                        <button
+                                            type="button"
+                                            className="chat-call-btn zalo-phone"
+                                            title="Gọi thoại nhóm"
+                                            onClick={onStartGroupAudioCall}
+                                            disabled={Boolean(activeCall)}
+                                        >
+                                            <MdCall />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="chat-call-btn zalo-video"
+                                            title="Gọi video nhóm"
+                                            onClick={onStartGroupCall}
+                                            disabled={Boolean(activeCall)}
+                                        >
+                                            <MdVideocam />
+                                        </button>
+                                    </>
+                                ) : null}
                                 <MdMenu className="info-toggle" onClick={() => setShowInfoPanel(v => !v)} title="Chi tiet" />
                             </div>
                         </div>
@@ -1032,6 +1215,7 @@ const ChatView = ({
                                 </div>
                             )}
                         </div>
+
                     </div>
                     {showInfoPanel && selectedContact && (
                         <div className="info-panel">
@@ -1355,6 +1539,118 @@ const ChatView = ({
                     <p>Giao tiếp không khoảng cách, kết nối không giới hạn</p>
                 </div>
             )}
+
+            {activeCall ? (
+                <div ref={callPanelRef} className={`call-zalo-panel ${isCallMaximized ? 'maximized' : ''} ${isCallFullscreen ? 'fullscreen-mode' : ''}`}>
+                    <div className="call-zalo-header">
+                        <div>
+                            <strong className="call-zalo-title">
+                                {activeCall.type === 'GROUP'
+                                    ? `${activeCallModeLabel} nhóm: ${activeCall.conversationName || 'Nhóm'}`
+                                    : `${activeCallModeLabel}: ${activeCall.peerName || 'Người dùng'}`}
+                            </strong>
+                            <p className="call-zalo-subtitle">
+                                {activeCall.status === 'calling'
+                                    ? 'Đang đổ chuông...'
+                                    : `Đã kết nối ${remoteCallStreams?.length || 0} người`}
+                            </p>
+                            <p className="call-zalo-subtitle">Thời lượng: {formatCallDuration(callDurationSeconds)}</p>
+                            {activeCall.callMode === 'video' && !hasLocalVideoTrack ? (
+                                <p className="call-zalo-subtitle" style={{ color: '#b91c1c' }}>
+                                    Camera chưa sẵn sàng. Kiểm tra quyền truy cập camera rồi gọi lại.
+                                </p>
+                            ) : null}
+                        </div>
+                        <div className="call-zalo-controls">
+                            <button
+                                type="button"
+                                className="call-zalo-control-btn muted"
+                                onClick={handleToggleCallFullscreen}
+                                title={(isCallFullscreen || isCallMaximized) ? 'Thoát toàn màn hình' : 'Toàn màn hình'}
+                            >
+                                {(isCallFullscreen || isCallMaximized) ? <MdFullscreenExit /> : <MdFullscreen />}
+                            </button>
+                            <button
+                                type="button"
+                                className={`call-zalo-control-btn ${callAudioEnabled ? 'active' : 'muted'}`}
+                                onClick={onToggleCallAudio}
+                                title={callAudioEnabled ? 'Tắt micro' : 'Bật micro'}
+                            >
+                                {callAudioEnabled ? <MdMic /> : <MdMicOff />}
+                            </button>
+                            <button
+                                type="button"
+                                className={`call-zalo-control-btn ${callVideoEnabled ? 'active' : 'muted'}`}
+                                onClick={onToggleCallVideo}
+                                disabled={activeCall.callMode === 'audio'}
+                                title={callVideoEnabled ? 'Tắt camera' : 'Bật camera'}
+                            >
+                                {callVideoEnabled ? <MdVideocam /> : <MdVideocamOff />}
+                            </button>
+                            <button type="button" className="call-zalo-control-btn end" onClick={() => onEndActiveCall('ended')}>
+                                <MdCallEnd />
+                            </button>
+                        </div>
+                    </div>
+
+                    <div
+                        className={`call-zalo-grid ${activeCall.callMode === 'audio' ? 'audio' : 'video'} ${callParticipantCount === 2 ? 'duo' : ''}`}
+                    >
+                        <div className="call-zalo-tile local">
+                            {activeCall.callMode === 'video' ? (
+                                <video
+                                    autoPlay
+                                    playsInline
+                                    muted
+                                    ref={(node) => {
+                                        if (!node || !localCallStream) return
+                                        if (node.srcObject !== localCallStream) node.srcObject = localCallStream
+                                    }}
+                                />
+                            ) : (
+                                <div className="call-zalo-avatar-only">B</div>
+                            )}
+                            <span>Bạn</span>
+                        </div>
+
+                        {(remoteCallStreams || []).map(({ userId, stream }) => (
+                            <div className="call-zalo-tile" key={String(userId)}>
+                                {activeCall.callMode === 'video' ? (
+                                    <video
+                                        autoPlay
+                                        playsInline
+                                        ref={(node) => {
+                                            if (!node || !stream) return
+                                            if (node.srcObject !== stream) node.srcObject = stream
+                                        }}
+                                    />
+                                ) : (
+                                    <div className="call-zalo-avatar-only">{(getUserDisplayNameById ? getUserDisplayNameById(userId) : 'T').charAt(0).toUpperCase()}</div>
+                                )}
+                                <span>{getUserDisplayNameById ? getUserDisplayNameById(userId) : 'Thành viên'}</span>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Audio call vẫn cần phần tử audio để phát tiếng remote stream. */}
+                    {activeCall.callMode === 'audio' ? (
+                        <div style={{ display: 'none' }}>
+                            {(remoteCallStreams || []).map(({ userId, stream }) => (
+                                <audio
+                                    key={`audio-${String(userId)}`}
+                                    autoPlay
+                                    playsInline
+                                    ref={(node) => {
+                                        if (!node || !stream) return
+                                        if (node.srcObject !== stream) node.srcObject = stream
+                                        node.play?.().catch(() => { })
+                                    }}
+                                />
+                            ))}
+                        </div>
+                    ) : null}
+                </div>
+            ) : null}
         </div>
     )
 }
