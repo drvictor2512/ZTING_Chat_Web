@@ -74,6 +74,7 @@ const Home = () => {
   // Call states (WebRTC)
   const [incomingCall, setIncomingCall] = useState(null)
   const [activeCall, setActiveCall] = useState(null)
+  const [ongoingGroupCalls, setOngoingGroupCalls] = useState({})
   const [localCallStream, setLocalCallStream] = useState(null)
   const [remoteCallStreams, setRemoteCallStreams] = useState([])
   const [callAudioEnabled, setCallAudioEnabled] = useState(true)
@@ -239,6 +240,12 @@ const Home = () => {
     } catch { }
 
     return ''
+  }
+
+  const getOngoingGroupCall = (conversationId) => {
+    const normalizedId = normalizeConversationId(conversationId)
+    if (!normalizedId) return null
+    return ongoingGroupCalls[normalizedId] || null
   }
 
   const normalizeUnreadCounts = (value) => {
@@ -1016,11 +1023,44 @@ const Home = () => {
 
   const handleStartGroupCall = async (callMode = 'video') => {
     if (!selectedContact || selectedContact.type !== 'GROUP' || !selectedContact._id) return
+    const conversationId = String(selectedContact._id)
+    const ongoing = getOngoingGroupCall(conversationId)
+
+    if (ongoing?.callId) {
+      try {
+        const ongoingMode = ongoing.callType === 'audio' ? 'audio' : 'video'
+        await callService.joinGroupCall({
+          conversationId,
+          callId: ongoing.callId,
+          callMode: ongoingMode
+        })
+
+        setCallAudioEnabled(true)
+        setCallVideoEnabled(true)
+        setIncomingCall(null)
+        setActiveCall({
+          type: 'GROUP',
+          status: 'connecting',
+          callMode: ongoingMode,
+          callId: ongoing.callId,
+          conversationId,
+          conversationName: selectedContact.name || 'Nhóm',
+          peerUserIds: [],
+          direction: 'incoming',
+          startedAt: Number(ongoing.startedAt || Date.now())
+        })
+        return
+      } catch (err) {
+        console.error('join ongoing group call error', err)
+        toast.error('Không thể tham gia cuộc gọi nhóm đang diễn ra')
+      }
+    }
+
     const callId = createCallId()
 
     try {
       await callService.startGroupCall({
-        conversationId: String(selectedContact._id),
+        conversationId,
         callId,
         metadata: { type: callMode },
         callMode
@@ -1034,7 +1074,7 @@ const Home = () => {
         status: 'calling',
         callMode,
         callId,
-        conversationId: String(selectedContact._id),
+        conversationId,
         conversationName: selectedContact.name || 'Nhóm',
         peerUserIds: [],
         direction: 'outgoing',
@@ -1460,6 +1500,64 @@ const Home = () => {
       cleanupCallUi()
     }
 
+    const handleGroupOngoing = (payload = {}) => {
+      const conversationId = normalizeConversationId(payload.conversationId)
+      const callId = String(payload.callId || '')
+      if (!conversationId || !callId) return
+
+      const callType = payload.callType === 'audio' ? 'audio' : 'video'
+      setOngoingGroupCalls((prev) => ({
+        ...prev,
+        [conversationId]: {
+          callId,
+          conversationId,
+          callType,
+          startedAt: Number(payload.startedAt || Date.now())
+        }
+      }))
+
+      const isNeedRejoinCurrentDialing =
+        activeCall?.type === 'GROUP' &&
+        activeCall?.status === 'calling' &&
+        String(activeCall?.conversationId || '') === conversationId &&
+        String(activeCall?.callId || '') !== callId
+
+      if (isNeedRejoinCurrentDialing) {
+        void (async () => {
+          try {
+            await callService.joinGroupCall({
+              conversationId,
+              callId,
+              callMode: callType
+            })
+            setActiveCall((prev) => {
+              if (!prev || prev.type !== 'GROUP') return prev
+              if (String(prev.conversationId || '') !== conversationId) return prev
+              return {
+                ...prev,
+                callId,
+                callMode: callType,
+                status: 'connecting'
+              }
+            })
+          } catch (err) {
+            console.error('auto-rejoin ongoing group call error', err)
+          }
+        })()
+      }
+    }
+
+    const handleGroupRoomClosed = (payload = {}) => {
+      const conversationId = normalizeConversationId(payload.conversationId)
+      if (!conversationId) return
+      setOngoingGroupCalls((prev) => {
+        if (!prev[conversationId]) return prev
+        const next = { ...prev }
+        delete next[conversationId]
+        return next
+      })
+    }
+
     const handleCallError = (payload = {}) => {
       const message = payload?.message || 'Lỗi cuộc gọi'
       toast.error(message, { id: 'call-signal-error' })
@@ -1478,6 +1576,8 @@ const Home = () => {
     socket.on('group-call:ice-candidate', handleGroupIce)
     socket.on('group-call:user-left', handleGroupUserLeft)
     socket.on('group-call:ended', handleGroupEnded)
+    socket.on('group-call:ongoing', handleGroupOngoing)
+    socket.on('group-call:room-closed', handleGroupRoomClosed)
 
     socket.on('call:error', handleCallError)
 
@@ -1495,6 +1595,8 @@ const Home = () => {
       socket.off('group-call:ice-candidate', handleGroupIce)
       socket.off('group-call:user-left', handleGroupUserLeft)
       socket.off('group-call:ended', handleGroupEnded)
+      socket.off('group-call:ongoing', handleGroupOngoing)
+      socket.off('group-call:room-closed', handleGroupRoomClosed)
 
       socket.off('call:error', handleCallError)
     }
