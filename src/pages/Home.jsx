@@ -1031,7 +1031,7 @@ const Home = () => {
       setIncomingCall(null)
       setActiveCall({
         type: 'GROUP',
-        status: 'in-call',
+        status: 'calling',
         callMode,
         callId,
         conversationId: String(selectedContact._id),
@@ -1155,7 +1155,7 @@ const Home = () => {
 
     if (callSnapshot.direction === 'outgoing') {
       const logType = reason === 'no-answer'
-        ? 'cancelled'
+        ? 'missed'
         : (callSnapshot.status === 'calling' ? 'cancelled' : 'answered')
       void sendCallLogMessage(callSnapshot, {
         type: logType,
@@ -1354,8 +1354,14 @@ const Home = () => {
         setActiveCall((prev) => {
           if (!prev || prev.type !== 'GROUP') return prev
           const exists = (prev.peerUserIds || []).some((id) => String(id) === String(joinedUserId))
-          if (exists) return prev
-          return { ...prev, peerUserIds: [...(prev.peerUserIds || []), joinedUserId] }
+          if (exists) {
+            return prev.status === 'in-call' ? prev : { ...prev, status: 'in-call' }
+          }
+          return {
+            ...prev,
+            status: 'in-call',
+            peerUserIds: [...(prev.peerUserIds || []), joinedUserId]
+          }
         })
       } catch (err) {
         console.error('create group offer error', err)
@@ -1377,8 +1383,14 @@ const Home = () => {
         setActiveCall((prev) => {
           if (!prev || prev.type !== 'GROUP') return prev
           const exists = (prev.peerUserIds || []).some((id) => String(id) === String(fromId))
-          if (exists) return prev
-          return { ...prev, peerUserIds: [...(prev.peerUserIds || []), fromId] }
+          if (exists) {
+            return prev.status === 'in-call' ? prev : { ...prev, status: 'in-call' }
+          }
+          return {
+            ...prev,
+            status: 'in-call',
+            peerUserIds: [...(prev.peerUserIds || []), fromId]
+          }
         })
       } catch (err) {
         console.error('handle group offer error', err)
