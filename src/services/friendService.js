@@ -66,15 +66,9 @@ const friendService = {
   },
 
   // Cancel / revoke a sent friend request
-  cancelFriendRequest: async (requestId, toUserId) => {
+  cancelFriendRequest: async (requestId) => {
     try {
-      // Thử dùng to (userId người nhận) theo pattern của send endpoint
-      if (toUserId) {
-        const response = await api.delete('/friends/requests', { data: { to: toUserId } })
-        return response.data
-      }
-      // Fallback: dùng requestId trong body
-      const response = await api.delete('/friends/requests', { data: { requestId } })
+      const response = await api.delete(`/friends/requests/${requestId}`)
       return response.data
     } catch (error) {
       throw error.response?.data || error.message

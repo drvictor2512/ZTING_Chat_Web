@@ -27,6 +27,9 @@ const ContactList = ({
           const avatarUrl = contact.participantAvatar || contact.avatarUrl
           const userId = contact.participantId || contact._id
           const isGroup = contact.type === 'GROUP'
+          const customGroupAvatar = isGroup
+            ? (contact.group?.avatarUrl || contact.groupAvatar || contact.avatarUrl || '')
+            : ''
           const rawParticipants = Array.isArray(contact.participants) ? contact.participants : []
           const normalizedParticipants = rawParticipants.map((p) => {
             const pId = p.userId?._id || p._id
@@ -110,7 +113,9 @@ const ContactList = ({
                 style={{ cursor: !isGroup && userId ? 'pointer' : 'default' }}
               >
                 <div className={`avatar ${isGroup ? 'avatar-group-stack' : ''}`}>
-                  {isGroup ? (
+                  {isGroup && customGroupAvatar ? (
+                    <img src={customGroupAvatar} alt={displayName || 'group'} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+                  ) : isGroup ? (
                     <div className={`group-avatar-stack count-${groupAvatarStackCount}`}>
                       {groupAvatarItems.map((member, index) => (
                         <div className={`group-stack-item pos-${index + 1} ${member.isCount ? 'is-count' : ''}`} key={member._id}>

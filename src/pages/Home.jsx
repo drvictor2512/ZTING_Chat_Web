@@ -47,6 +47,7 @@ const Home = () => {
   const [profileForm, setProfileForm] = useState({ name: '', dateOfBirth: '', gender: '', bio: '' })
   const avatarInputRef = useRef(null)
   const bannerInputRef = useRef(null)
+  const groupAvatarInputRef = useRef(null)
   const [selectedContact, setSelectedContact] = useState(null)
   const [messages, setMessages] = useState([])
   const [newMessage, setNewMessage] = useState('')
@@ -60,6 +61,7 @@ const Home = () => {
   const [directChatBlockedNotice, setDirectChatBlockedNotice] = useState('')
   const [onlineStatus, setOnlineStatus] = useState({}) // { userId: { status: 'online'|'offline', lastSeen: timestamp } }
   const messagesEndRef = useRef(null)
+  const prevMessageCountRef = useRef(0)
   const messageInputRef = useRef(null)
   const toneContextRef = useRef(null)
   const incomingToneIntervalRef = useRef(null)
@@ -1087,6 +1089,43 @@ const Home = () => {
     }
   }
 
+  const handleJoinGroupOngoingFromBanner = async () => {
+    if (!selectedContact || selectedContact.type !== 'GROUP' || !selectedContact._id) return
+    const conversationId = String(selectedContact._id)
+    const ongoing = getOngoingGroupCall(conversationId)
+    if (!ongoing?.callId) {
+      toast('Hiện chưa có cuộc gọi nhóm đang diễn ra')
+      return
+    }
+
+    try {
+      const ongoingMode = ongoing.callType === 'audio' ? 'audio' : 'video'
+      await callService.joinGroupCall({
+        conversationId,
+        callId: ongoing.callId,
+        callMode: ongoingMode
+      })
+
+      setCallAudioEnabled(true)
+      setCallVideoEnabled(true)
+      setIncomingCall(null)
+      setActiveCall({
+        type: 'GROUP',
+        status: 'connecting',
+        callMode: ongoingMode,
+        callId: ongoing.callId,
+        conversationId,
+        conversationName: selectedContact.name || 'Nhóm',
+        peerUserIds: [],
+        direction: 'incoming',
+        startedAt: Number(ongoing.startedAt || Date.now())
+      })
+    } catch (err) {
+      console.error('join ongoing group call from banner error', err)
+      toast.error('Không thể tham gia cuộc gọi nhóm đang diễn ra')
+    }
+  }
+
   const handleAcceptIncomingCall = async () => {
     if (!incomingCall) return
 
@@ -1512,7 +1551,9 @@ const Home = () => {
           callId,
           conversationId,
           callType,
-          startedAt: Number(payload.startedAt || Date.now())
+          startedAt: Number(payload.startedAt || Date.now()),
+          memberCount: Number(payload.memberCount || 0),
+          groupName: String(payload.groupName || '')
         }
       }))
 
@@ -1923,6 +1964,29 @@ const Home = () => {
     }
   }
 
+  const handleOpenGroupAvatarPicker = () => {
+    if (!selectedContact?._id || selectedContact?.type !== 'GROUP') return
+    groupAvatarInputRef.current?.click()
+  }
+
+  const handleGroupAvatarUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file || !selectedContact?._id || selectedContact?.type !== 'GROUP') return
+
+    try {
+      setGroupActionLoading(true)
+      await conversationService.updateGroupAvatar(selectedContact._id, file)
+      await refreshSelectedGroup(selectedContact._id)
+      toast.success('Đổi ảnh nhóm thành công')
+    } catch (err) {
+      console.error('update group avatar failed', err)
+      setError(err?.message || 'Không thể đổi ảnh nhóm')
+    } finally {
+      if (e.target) e.target.value = ''
+      setGroupActionLoading(false)
+    }
+  }
+
   const handlePasswordChange = e => {
     const { name, value } = e.target
     setPasswordForm(prev => ({ ...prev, [name]: value }))
@@ -2128,10 +2192,19 @@ const Home = () => {
 
   // scroll to bottom when messages change
   useEffect(() => {
-    if (messagesEndRef.current) {
+    if (!selectedContact) {
+      prevMessageCountRef.current = 0
+      return
+    }
+
+    const prevCount = prevMessageCountRef.current
+    const currentCount = messages.length
+    prevMessageCountRef.current = currentCount
+
+    if (currentCount > prevCount && messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
     }
-  }, [messages])
+  }, [messages.length, selectedContact])
 
   // actions for info panel
   const toggleBlock = async () => {
@@ -3104,22 +3177,36 @@ const Home = () => {
     }
   }
 
-  // Send a friend request to given user id
-  const handleSendRequest = async (userId) => {
-    try {
-      await friendService.sendFriendRequest(userId)
-      await loadFriendRequests()
-      toast.success('Đã gửi yêu cầu kết bạn')
-    } catch (err) {
-      setError('Không thể gửi yêu cầu kết bạn')
-    }
+  const resolveUserNameForRequest = (userId) => {
+    if (!userId) return 'Người dùng'
+    const normalized = String(userId)
+
+    const fromFriends = friends.find(f => String(f._id) === normalized)
+    if (fromFriends?.name) return fromFriends.name
+
+    const fromConv = conversations
+      .flatMap(c => c?.participants || [])
+      .find(p => String(p?._id || p?.userId?._id || '') === normalized)
+    if (fromConv?.name || fromConv?.userId?.name) return fromConv.name || fromConv.userId?.name
+
+    if (popupUser && String(popupUser._id) === normalized) return popupUser.name || 'Người dùng'
+    return 'Người dùng'
+  }
+
+  // Open send-request popup for all friend entry points (sidebar/profile/group members)
+  const handleSendRequest = (userId, userName = '') => {
+    if (!userId) return
+    const resolvedName = userName || resolveUserNameForRequest(userId)
+    setSelectedUserToAdd({ _id: userId, name: resolvedName })
+    setRequestMessage('Xin chào, mình muốn kết bạn với bạn!')
+    setShowSendRequestModal(true)
   }
 
   // Revoke a sent friend request
   const handleRevokeRequest = async (requestId, toUserId) => {
     if (!requestId) return
     try {
-      await friendService.cancelFriendRequest(requestId, toUserId)
+      await friendService.cancelFriendRequest(requestId)
       // Cập nhật local state ngay
       setSentRequests(prev => prev.filter(r => String(r._id) !== String(requestId)))
       toast.success('Đã thu hồi lời mời kết bạn')
@@ -3167,8 +3254,7 @@ const Home = () => {
 
   // Open send request popup
   const handleSendRequestFromModal = (userId, userName) => {
-    setSelectedUserToAdd({ _id: userId, name: userName })
-    setShowSendRequestModal(true)
+    handleSendRequest(userId, userName)
   }
 
   // Confirm send friend request with message
@@ -3411,6 +3497,9 @@ const Home = () => {
             friendRequests={friendRequests}
             handleUnfriend={handleUnfriend}
             handleSendRequest={handleSendRequest}
+            handleOpenGroupAvatarPicker={handleOpenGroupAvatarPicker}
+            handleGroupAvatarInputChange={handleGroupAvatarUpload}
+            groupAvatarInputRef={groupAvatarInputRef}
             messages={messages}
             isSystemGroupMessage={isSystemGroupMessage}
             isDifferentDay={isDifferentDay}
@@ -3491,6 +3580,8 @@ const Home = () => {
             callAudioEnabled={callAudioEnabled}
             callVideoEnabled={callVideoEnabled}
             getUserDisplayNameById={getUserDisplayNameById}
+            ongoingGroupCall={selectedContact?.type === 'GROUP' ? getOngoingGroupCall(selectedContact?._id) : null}
+            onJoinOngoingGroupCall={handleJoinGroupOngoingFromBanner}
           />
         )
 
@@ -3690,7 +3781,10 @@ const Home = () => {
         selectedUser={selectedUserToAdd}
         requestMessage={requestMessage}
         onMessageChange={setRequestMessage}
-        onClose={() => setShowSendRequestModal(false)}
+        onClose={() => {
+          setShowSendRequestModal(false)
+          setSelectedUserToAdd(null)
+        }}
         onConfirm={confirmSendRequest}
       />
 

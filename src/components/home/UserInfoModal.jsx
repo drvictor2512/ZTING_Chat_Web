@@ -33,7 +33,7 @@ const UserInfoModal = ({
 
     const handleAddClick = () => {
         if (onAddFriend) {
-            onAddFriend(user._id)
+            onAddFriend(user._id, user.name)
             onClose()
         }
     }

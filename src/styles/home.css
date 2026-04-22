@@ -2355,6 +2355,68 @@
   color: #000;
 }
 
+.chat-ongoing-call-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #3f6212;
+  border-bottom: 1px solid #365314;
+}
+
+.chat-ongoing-call-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.chat-ongoing-call-dot {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: #65a30d;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.chat-ongoing-call-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ecfccb;
+}
+
+.chat-ongoing-call-subtitle {
+  font-size: 12px;
+  color: #d9f99d;
+  margin-top: 1px;
+}
+
+.chat-ongoing-call-join-btn {
+  border: none;
+  background: #84cc16;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 8px 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.chat-ongoing-call-join-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.chat-ongoing-call-join-btn:hover:not(:disabled) {
+  background: #65a30d;
+}
+
 .chat-pinned-bar {
   display: flex;
   align-items: center;
@@ -3111,8 +3173,8 @@
 }
 
 .info-panel {
-  width: 280px;
-  min-width: 240px;
+  width: 390px;
+  min-width: 340px;
   border-left: 1px solid #e0e0e0;
   background: #fafafa;
   display: flex;
@@ -3385,10 +3447,20 @@
 
 .member-main {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.member-avatar-btn {
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.member-avatar-btn:hover {
+  opacity: 0.9;
 }
 
 .member-avatar {
@@ -3415,29 +3487,82 @@
 .member-meta {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
+  flex: 1 1 auto;
+}
+
+.member-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
 }
 
 .member-name {
   color: #000;
   text-align: left;
-  line-height: 1.25;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.member-name-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.member-name-btn:hover {
+  color: #1d4ed8;
 }
 
 .member-role {
   color: #666;
   text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.member-friend-chip {
+  border-radius: 999px;
+  border: 1px solid #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  flex-shrink: 0;
+}
+
+.member-friend-chip.pending {
+  border-color: #e5e7eb;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.member-friend-add-btn {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.member-friend-add-btn:hover {
+  background: #dbeafe;
 }
 
 .member-actions-inline {
   display: flex;
+  align-items: center;
   gap: 6px;
   flex-shrink: 0;
   flex-wrap: nowrap;

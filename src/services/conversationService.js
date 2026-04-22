@@ -106,6 +106,19 @@ const conversationService = {
     }
   },
 
+  // Update group avatar
+  updateGroupAvatar: async (conversationId, file) => {
+    try {
+      const formData = new FormData()
+      formData.append('conversationId', conversationId)
+      formData.append('image', file)
+      const response = await api.post('/conversations/group/avatar', formData)
+      return response.data
+    } catch (error) {
+      throw error.response?.data || error.message
+    }
+  },
+
   // Add member to group
   addGroupMember: async (conversationId, userId) => {
     try {

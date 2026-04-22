@@ -38,6 +38,9 @@ const ChatView = ({
     friendRequests,
     handleUnfriend,
     handleSendRequest,
+    handleOpenGroupAvatarPicker,
+    handleGroupAvatarInputChange,
+    groupAvatarInputRef,
     messages,
     isSystemGroupMessage,
     isDifferentDay,
@@ -117,7 +120,9 @@ const ChatView = ({
     onToggleCallVideo,
     callAudioEnabled,
     callVideoEnabled,
-    getUserDisplayNameById
+    getUserDisplayNameById,
+    ongoingGroupCall,
+    onJoinOngoingGroupCall
 }) => {
     const BASIC_REACTIONS = ['👍', '❤️', '😂', '😮', '😢']
     const [pinMenuOpen, setPinMenuOpen] = useState(false)
@@ -179,6 +184,27 @@ const ChatView = ({
             new Date(b.pinnedAt || 0).getTime() - new Date(a.pinnedAt || 0).getTime()
         )
     }, [messages])
+
+    const friendIdSet = useMemo(() => {
+        const ids = (friends || [])
+            .map((friend) => String(friend?._id || friend?.userId?._id || friend?.userId || ''))
+            .filter(Boolean)
+        return new Set(ids)
+    }, [friends])
+
+    const sentRequestUserIdSet = useMemo(() => {
+        const ids = (sentRequests || [])
+            .map((request) => String(request?.toUserId?._id || request?.toUserId || ''))
+            .filter(Boolean)
+        return new Set(ids)
+    }, [sentRequests])
+
+    const incomingRequestUserIdSet = useMemo(() => {
+        const ids = (friendRequests || [])
+            .map((request) => String(request?.fromUserId?._id || request?.fromUserId || ''))
+            .filter(Boolean)
+        return new Set(ids)
+    }, [friendRequests])
 
     const primaryPinnedMessage = pinnedMessages[0] || null
     const pinnedCount = pinnedMessages.length
@@ -570,6 +596,10 @@ const ChatView = ({
                                 >
                                     <div className={`chat-avatar ${selectedContact?.type === 'GROUP' ? 'group-chat-avatar' : ''}`}>
                                         {selectedContact?.type === 'GROUP' ? (() => {
+                                            const customGroupAvatar = selectedContact.group?.avatarUrl || selectedContact.groupAvatar || selectedContact.avatarUrl || ''
+                                            if (customGroupAvatar) {
+                                                return <img src={customGroupAvatar} alt={selectedContact.name || 'group'} />
+                                            }
                                             const rawGroupParticipants = Array.isArray(selectedContact.participants) ? selectedContact.participants : []
                                             const normalizedGroupParticipants = rawGroupParticipants.map((p) => {
                                                 const pId = p.userId?._id || p._id
@@ -695,6 +725,31 @@ const ChatView = ({
                                 <MdMenu className="info-toggle" onClick={() => setShowInfoPanel(v => !v)} title="Chi tiet" />
                             </div>
                         </div>
+
+                        {selectedContact?.type === 'GROUP' && ongoingGroupCall?.callId &&
+                            !(activeCall?.type === 'GROUP' && String(activeCall?.conversationId || '') === String(selectedContact?._id || '')) ? (
+                            <div className="chat-ongoing-call-banner">
+                                <div className="chat-ongoing-call-info">
+                                    <span className="chat-ongoing-call-dot">
+                                        <MdVideocam />
+                                    </span>
+                                    <div>
+                                        <div className="chat-ongoing-call-title">Cuộc gọi nhóm đang diễn ra</div>
+                                        <div className="chat-ongoing-call-subtitle">
+                                            {(ongoingGroupCall?.memberCount || 0)} thành viên
+                                        </div>
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    className="chat-ongoing-call-join-btn"
+                                    onClick={onJoinOngoingGroupCall}
+                                    disabled={Boolean(activeCall)}
+                                >
+                                    Tham gia
+                                </button>
+                            </div>
+                        ) : null}
 
                         {primaryPinnedMessage ? (
                             <div className="chat-pinned-bar">
@@ -1315,29 +1370,46 @@ const ChatView = ({
                                         })
                                     })()
                                     const groupAvatarStackCount = groupAvatarItems.length
+                                    const customGroupAvatar = selectedContact.group?.avatarUrl || selectedContact.groupAvatar || selectedContact.avatarUrl || ''
 
                                     return (
                                         <>
                                             <div className="info-header">
                                                 <div className="avatar-large group-avatar-large">
-                                                    <div className={`group-avatar-stack count-${groupAvatarStackCount}`}>
-                                                        {groupAvatarItems.map((member, index) => (
-                                                            <div className={`group-stack-item pos-${index + 1} ${member.isCount ? 'is-count' : ''}`} key={member._id}>
-                                                                {member.isCount ? (
-                                                                    <span>{member.name}</span>
-                                                                ) : member.avatarUrl ? (
-                                                                    <img src={member.avatarUrl} alt={member.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-                                                                ) : (
-                                                                    <span style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: '#ccc', fontSize: '18px', fontWeight: 'bold' }}>{(member.name || 'G').charAt(0).toUpperCase()}</span>
-                                                                )}
-                                                            </div>
-                                                        ))}
-                                                    </div>
+                                                    {customGroupAvatar ? (
+                                                        <img src={customGroupAvatar} alt={selectedContact.name || 'group avatar'} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                                                    ) : (
+                                                        <div className={`group-avatar-stack count-${groupAvatarStackCount}`}>
+                                                            {groupAvatarItems.map((member, index) => (
+                                                                <div className={`group-stack-item pos-${index + 1} ${member.isCount ? 'is-count' : ''}`} key={member._id}>
+                                                                    {member.isCount ? (
+                                                                        <span>{member.name}</span>
+                                                                    ) : member.avatarUrl ? (
+                                                                        <img src={member.avatarUrl} alt={member.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                                                                    ) : (
+                                                                        <span style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: '#ccc', fontSize: '18px', fontWeight: 'bold' }}>{(member.name || 'G').charAt(0).toUpperCase()}</span>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
                                                 </div>
                                                 <h3>{selectedContact.name}</h3>
                                                 <p>{totalGroupMembers} thành viên</p>
+                                                {selectedContact?.type === 'GROUP' ? (
+                                                    <input
+                                                        ref={groupAvatarInputRef}
+                                                        type="file"
+                                                        accept="image/*"
+                                                        style={{ display: 'none' }}
+                                                        onChange={handleGroupAvatarInputChange}
+                                                    />
+                                                ) : null}
                                                 <div className="group-actions">
                                                     <button className="member-action-btn" onClick={handleOpenAddMembersModal} disabled={groupActionLoading}>Thêm thành viên</button>
+                                                    {canRenameGroup && (
+                                                        <button className="member-action-btn" onClick={handleOpenGroupAvatarPicker} disabled={groupActionLoading}>Đổi ảnh nhóm</button>
+                                                    )}
                                                     <MdLink className="action-icon" title="Mã mời nhóm" onClick={handleGetInviteLink} />
                                                     {canRenameGroup && (
                                                         <MdEdit className="action-icon" title="Đổi tên nhóm" onClick={handleRenameGroup} />
@@ -1358,23 +1430,58 @@ const ChatView = ({
                                                         const canRemove = canManageMembers && !isSelf && roleType !== 'OWNER'
                                                         const canPromote = canManageRoles && !isSelf && roleType === 'MEMBER'
                                                         const canDemote = canManageRoles && !isSelf && roleType === 'DEPUTY'
+                                                        const normalizedMemberId = String(userId || '')
+                                                        const isFriendMember = friendIdSet.has(normalizedMemberId)
+                                                        const hasSentRequest = sentRequestUserIdSet.has(normalizedMemberId)
+                                                        const hasIncomingRequest = incomingRequestUserIdSet.has(normalizedMemberId)
 
                                                         return (
                                                             <div className="member-item" key={userId}>
                                                                 <div className="member-main" title={`${fullName} - ${fullRole}`}>
-                                                                    <div className="member-avatar">
+                                                                    <button
+                                                                        type="button"
+                                                                        className="member-avatar member-avatar-btn"
+                                                                        onClick={() => openUserPopup(normalizedMemberId)}
+                                                                        title="Xem trang cá nhân"
+                                                                    >
                                                                         {userAvatar ? (
                                                                             <img src={userAvatar} alt={userName} />
                                                                         ) : (
                                                                             (userName || 'U').charAt(0).toUpperCase()
                                                                         )}
-                                                                    </div>
+                                                                    </button>
                                                                     <div className="member-meta">
-                                                                        <span className="member-name">{fullName}</span>
+                                                                        <div className="member-name-row">
+                                                                            <button
+                                                                                type="button"
+                                                                                className="member-name member-name-btn"
+                                                                                onClick={() => openUserPopup(normalizedMemberId)}
+                                                                                title="Xem trang cá nhân"
+                                                                            >
+                                                                                {fullName}
+                                                                            </button>
+                                                                        </div>
                                                                         <span className="member-role">{fullRole}</span>
                                                                     </div>
                                                                 </div>
                                                                 <div className="member-actions-inline">
+                                                                    {!isSelf ? (
+                                                                        isFriendMember ? (
+                                                                            <span className="member-friend-chip">Bạn bè</span>
+                                                                        ) : hasSentRequest ? (
+                                                                            <span className="member-friend-chip pending">Đã gửi</span>
+                                                                        ) : hasIncomingRequest ? (
+                                                                            <span className="member-friend-chip pending">Đã nhận lời mời</span>
+                                                                        ) : (
+                                                                            <button
+                                                                                type="button"
+                                                                                className="member-friend-add-btn"
+                                                                                onClick={() => handleSendRequest(normalizedMemberId, userName)}
+                                                                            >
+                                                                                Kết bạn
+                                                                            </button>
+                                                                        )
+                                                                    ) : null}
                                                                     {canPromote && (
                                                                         <button className="member-action-btn" onClick={() => handlePromoteMember(userId, userName)} disabled={groupActionLoading}>Phó nhóm</button>
                                                                     )}
@@ -1513,13 +1620,13 @@ const ChatView = ({
                                                     )
                                                 } else if (incomingRequest) {
                                                     return (
-                                                        <button className="btn" onClick={() => handleUnfriend(contactId)}>
-                                                            Cách từ chối
+                                                        <button className="btn-warning" disabled>
+                                                            Đã nhận lời mời
                                                         </button>
                                                     )
                                                 } else {
                                                     return (
-                                                        <button className="btn" onClick={() => handleSendRequest(contactId)}>
+                                                        <button className="btn" onClick={() => handleSendRequest(contactId, selectedContact.participantName || selectedContact.name)}>
                                                             Kết bạn
                                                         </button>
                                                     )
