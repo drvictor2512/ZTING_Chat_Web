@@ -303,6 +303,17 @@ const ChatView = ({
         return '[File]'
     }
 
+    const getPinnedMediaPreview = (msg) => {
+        if (!msg) return null
+        const fileUrls = getMessageFileUrls(msg)
+        if (!fileUrls.length) return null
+        const imageUrl = fileUrls.find((url, index) => getAttachmentKind(msg, url, index) === 'image')
+        if (imageUrl) {
+            return { type: 'image', url: imageUrl }
+        }
+        return null
+    }
+
     const scrollToPinnedMessage = (messageId) => {
         if (!messageId) return
         const node = messageRefs.current.get(String(messageId))
@@ -322,6 +333,59 @@ const ChatView = ({
             .map((item) => String(item || '').trim())
             .filter(Boolean)
             .filter((url, index, arr) => arr.indexOf(url) === index)
+    }
+
+    const getReplyFileUrls = (replyTo) => {
+        const direct = Array.isArray(replyTo?.fileUrls) ? replyTo.fileUrls : []
+        const legacy = replyTo?.fileUrl ? [replyTo.fileUrl] : []
+        return [...direct, ...legacy]
+            .map((item) => String(item || '').trim())
+            .filter(Boolean)
+            .filter((url, index, arr) => arr.indexOf(url) === index)
+    }
+
+    const getReplyPreviewMedia = (replyTo) => {
+        if (!replyTo || replyTo?.isRecalled) return null
+
+        const fileUrls = getReplyFileUrls(replyTo)
+        const attachmentImage = fileUrls.find((url, index) => getAttachmentKind(replyTo, url, index) === 'image')
+        if (attachmentImage) return { type: 'image', url: attachmentImage }
+
+        const content = String(replyTo?.content || '').trim()
+        if (content && (isImageUrl(content) || isGifUrl(content))) {
+            return { type: 'image', url: content }
+        }
+
+        if (/^\[Ảnh\]/i.test(content) && fileUrls.length) {
+            return { type: 'image', url: fileUrls[0] }
+        }
+
+        return null
+    }
+
+    const getReplyPreviewText = (replyTo, maxLength = 50) => {
+        if (!replyTo) return '[Tin nhắn]'
+        if (replyTo?.isRecalled) return '[Tin nhắn đã bị thu hồi]'
+
+        const content = String(replyTo?.content || '').trim()
+        const isContentImage = isImageUrl(content) || isGifUrl(content)
+        const isContentVideo = isVideoUrl(content)
+        const isContentDoc = isDocumentUrl(content)
+        if (content && !(isContentImage || isContentVideo || isContentDoc)) {
+            return content.length > maxLength ? `${content.substring(0, maxLength)}...` : content
+        }
+
+        const fileUrls = getReplyFileUrls(replyTo)
+        if (!fileUrls.length) {
+            if (isContentImage) return '[Ảnh]'
+            if (isContentVideo) return '[Video]'
+            if (isContentDoc) return '[File]'
+            return content || '[Tin nhắn]'
+        }
+
+        if (fileUrls.every((url, index) => getAttachmentKind(replyTo, url, index) === 'image')) return '[Ảnh]'
+        if (fileUrls.every((url, index) => getAttachmentKind(replyTo, url, index) === 'video')) return '[Video]'
+        return '[File]'
     }
 
     const getAttachmentKind = (msg, url, index) => {
@@ -758,6 +822,20 @@ const ChatView = ({
                                     onClick={() => scrollToPinnedMessage(primaryPinnedMessage._id)}
                                 >
                                     <span className="chat-pinned-icon">📌</span>
+                                    {getPinnedMediaPreview(primaryPinnedMessage) ? (
+                                        <img
+                                            src={getPinnedMediaPreview(primaryPinnedMessage).url}
+                                            alt="Pinned"
+                                            style={{
+                                                width: 34,
+                                                height: 34,
+                                                borderRadius: 6,
+                                                objectFit: 'cover',
+                                                marginRight: 8,
+                                                flexShrink: 0,
+                                            }}
+                                        />
+                                    ) : null}
                                     <span className="chat-pinned-text" title={getPinnedPreview(primaryPinnedMessage)}>
                                         {getPinnedPreview(primaryPinnedMessage)}
                                     </span>
@@ -810,6 +888,20 @@ const ChatView = ({
                                                 onClick={() => scrollToPinnedMessage(msg._id)}
                                             >
                                                 <span className="chat-pinned-list-title">Tin nhắn</span>
+                                                {getPinnedMediaPreview(msg) ? (
+                                                    <img
+                                                        src={getPinnedMediaPreview(msg).url}
+                                                        alt="Pinned"
+                                                        style={{
+                                                            width: 28,
+                                                            height: 28,
+                                                            borderRadius: 6,
+                                                            objectFit: 'cover',
+                                                            marginRight: 8,
+                                                            flexShrink: 0,
+                                                        }}
+                                                    />
+                                                ) : null}
                                                 <span className="chat-pinned-list-preview">{getPinnedPreview(msg)}</span>
                                             </button>
                                             <button
@@ -935,39 +1027,60 @@ const ChatView = ({
                                                                             <div className="message-reply-preview">
                                                                                 <div className="reply-preview-bar"></div>
                                                                                 <div className="reply-preview-content">
-                                                                                    <span className="reply-preview-name">
+                                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                                                                         {(() => {
-                                                                                            const replySender = msg.replyTo.senderId
-                                                                                            if (typeof replySender === 'object' && replySender?.name) {
-                                                                                                return replySender.name
-                                                                                            }
-                                                                                            if (typeof replySender === 'object' && replySender?._id) {
-                                                                                                const senderId = String(replySender._id)
-                                                                                                const foundParticipant = selectedContact?.participants?.find(p => {
-                                                                                                    const pId = p._id || p.userId?._id
-                                                                                                    return String(pId) === senderId
-                                                                                                })
-                                                                                                if (foundParticipant) {
-                                                                                                    return foundParticipant.name || foundParticipant.userId?.name || 'Người dùng'
-                                                                                                }
-                                                                                            }
-                                                                                            if (typeof replySender === 'string') {
-                                                                                                const foundParticipant = selectedContact?.participants?.find(p => {
-                                                                                                    const pId = p._id || p.userId?._id
-                                                                                                    return String(pId) === replySender
-                                                                                                })
-                                                                                                if (foundParticipant) {
-                                                                                                    return foundParticipant.name || foundParticipant.userId?.name || 'Người dùng'
-                                                                                                }
-                                                                                            }
-                                                                                            return 'Người dùng'
+                                                                                            const replyPreviewMedia = getReplyPreviewMedia(msg.replyTo)
+                                                                                            const replyPreviewText = getReplyPreviewText(msg.replyTo, 50) || '[Tin nhắn đã bị xóa]'
+                                                                                            const hideReplyPreviewText =
+                                                                                                replyPreviewMedia && /^\[(Ảnh|Video|File)\]/i.test(replyPreviewText)
+                                                                                            return (
+                                                                                                <>
+                                                                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                                                                        <span className="reply-preview-name">
+                                                                                                            {(() => {
+                                                                                                                const replySender = msg.replyTo.senderId
+                                                                                                                if (typeof replySender === 'object' && replySender?.name) {
+                                                                                                                    return replySender.name
+                                                                                                                }
+                                                                                                                if (typeof replySender === 'object' && replySender?._id) {
+                                                                                                                    const senderId = String(replySender._id)
+                                                                                                                    const foundParticipant = selectedContact?.participants?.find(p => {
+                                                                                                                        const pId = p._id || p.userId?._id
+                                                                                                                        return String(pId) === senderId
+                                                                                                                    })
+                                                                                                                    if (foundParticipant) {
+                                                                                                                        return foundParticipant.name || foundParticipant.userId?.name || 'Người dùng'
+                                                                                                                    }
+                                                                                                                }
+                                                                                                                if (typeof replySender === 'string') {
+                                                                                                                    const foundParticipant = selectedContact?.participants?.find(p => {
+                                                                                                                        const pId = p._id || p.userId?._id
+                                                                                                                        return String(pId) === replySender
+                                                                                                                    })
+                                                                                                                    if (foundParticipant) {
+                                                                                                                        return foundParticipant.name || foundParticipant.userId?.name || 'Người dùng'
+                                                                                                                    }
+                                                                                                                }
+                                                                                                                return 'Người dùng'
+                                                                                                            })()}
+                                                                                                        </span>
+                                                                                                        {!hideReplyPreviewText ? (
+                                                                                                            <span className="reply-preview-text">
+                                                                                                                {replyPreviewText}
+                                                                                                            </span>
+                                                                                                        ) : null}
+                                                                                                    </div>
+                                                                                                    {replyPreviewMedia ? (
+                                                                                                        <img
+                                                                                                            src={replyPreviewMedia.url}
+                                                                                                            alt="reply"
+                                                                                                            style={{ width: 34, height: 34, borderRadius: 6, objectFit: 'cover' }}
+                                                                                                        />
+                                                                                                    ) : null}
+                                                                                                </>
+                                                                                            )
                                                                                         })()}
-                                                                                    </span>
-                                                                                    <span className="reply-preview-text">
-                                                                                        {msg.replyTo.content?.length > 50 
-                                                                                            ? msg.replyTo.content.substring(0, 50) + '...' 
-                                                                                            : msg.replyTo.content || '[Tin nhắn đã bị xóa]'}
-                                                                                    </span>
+                                                                                    </div>
                                                                                 </div>
                                                                             </div>
                                                                         )}
@@ -1196,13 +1309,18 @@ const ChatView = ({
                                                 return 'tin nhắn'
                                             })()}</strong></span>
                                             <span className="reply-preview-text">
-                                                {replyingTo.content?.length > 60 
-                                                    ? replyingTo.content.substring(0, 60) + '...' 
-                                                    : replyingTo.content || '[Tin nhắn]'}
+                                                {getReplyPreviewText(replyingTo, 60)}
                                             </span>
                                         </div>
+                                        {getReplyPreviewMedia(replyingTo) ? (
+                                            <img
+                                                src={getReplyPreviewMedia(replyingTo).url}
+                                                alt="reply"
+                                                style={{ width: 38, height: 38, borderRadius: 8, objectFit: 'cover', marginLeft: 12 }}
+                                            />
+                                        ) : null}
                                     </div>
-                                    <button 
+                                    <button
                                         className="reply-preview-cancel"
                                         onClick={() => setReplyingTo && setReplyingTo(null)}
                                         title="Hủy trả lời"
